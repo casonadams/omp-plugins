@@ -65,11 +65,14 @@ _(Or inside an interactive session: `/marketplace update casonadams-plugins`)_
 Upgrade installed plugins to their latest versions:
 
 ```bash
-omp plugin upgrade omp-bash-guard
+# Upgrade all marketplace plugins
+omp plugin upgrade
+
+# Or upgrade specifically
+omp plugin upgrade omp-bash-guard@casonadams-plugins
 ```
 
-_(Or inside an interactive session: `/marketplace upgrade omp-bash-guard`)_
-
+_(Or inside an interactive session: `/marketplace upgrade omp-bash-guard@casonadams-plugins`)_
 ## Health & Verification
 
 Verify installed plugins and diagnose configuration issues:
