@@ -1,0 +1,19 @@
+{
+  "name": "casonadams-plugins",
+  "description": "Extensions and plugins for oh-my-pi",
+  "owner": {
+    "name": "Cason Adams"
+  },
+  "plugins": [
+    {
+      "name": "omp-bash-guard",
+      "description": "Security gatekeeper extension for shell execution using the configured guard/judge model role",
+      "category": "security",
+      "source": {
+        "source": "github",
+        "repo": "casonadams/omp-bash-guard"
+      },
+      "homepage": "https://github.com/casonadams/omp-bash-guard"
+    }
+  ]
+}
