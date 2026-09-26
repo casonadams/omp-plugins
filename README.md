@@ -1,6 +1,7 @@
 # casonadams-plugins
 
-Official marketplace catalog for [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`) plugins and extensions.
+Official marketplace catalog for [oh-my-pi](https://github.com/can1357/oh-my-pi)
+(`omp`) plugins and extensions.
 
 ## Adding the Marketplace
 
@@ -18,8 +19,8 @@ Or inside an interactive `omp` session:
 
 ## Available Plugins
 
-| Plugin | Category | Description |
-|---|---|---|
+| Plugin                                                           | Category | Description                                                                                   |
+| ---------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------- |
 | [`omp-bash-guard`](https://github.com/casonadams/omp-bash-guard) | Security | Security gatekeeper extension for shell execution using the configured guard/judge model role |
 
 ## Installing Plugins
