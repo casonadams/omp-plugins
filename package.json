@@ -1,0 +1,16 @@
+{
+  "name": "omp-plugins",
+  "private": true,
+  "workspaces": [
+    "plugins/*"
+  ],
+  "scripts": {
+    "check": "bun --filter '*' check",
+    "test": "bun --filter '*' test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2"
+  }
+}
