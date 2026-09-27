@@ -45,6 +45,8 @@ Install a plugin from this catalog:
 omp plugin install guard@casonadams-plugins
 ```
 
+> **Note:** The `@casonadams-plugins` suffix is required. Running `omp plugin install guard` without it resolves to an unrelated package from the npm registry.
+
 _Note: If you previously installed directly via GitHub or an older package name,
 use `--force` to switch tracking to the marketplace catalog:_
 
@@ -89,5 +91,5 @@ omp plugin doctor
 Remove a plugin:
 
 ```sh
-omp plugin uninstall guard
+omp plugin uninstall guard@casonadams-plugins
 ```

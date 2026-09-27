@@ -10,6 +10,8 @@ Evaluates shell commands before execution and classifies their risk against soft
 omp plugin install guard@casonadams-plugins
 ```
 
+> **Note:** The `@casonadams-plugins` qualifier is required. Running `omp plugin install guard` without it resolves to an unrelated package from the npm registry.
+
 ## Features
 
 - **Decoupled Model Configuration**: Uses your configured `guard` model role in `config.yml` (falls back to `judge`). Works with any provider supported by oh-my-pi (Ollama, Anthropic, OpenAI, Gemini, Bedrock, etc.).
