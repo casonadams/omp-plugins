@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "omp-bash-guard",
+      "name": "guard",
       "dependencies": {
         "@oh-my-pi/pi-ai": "^18.3.2",
       },
