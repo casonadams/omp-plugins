@@ -6,7 +6,7 @@ Evaluates shell commands before execution and classifies their risk against soft
 
 ## Quick Install
 
-```bash
+```sh
 omp plugin install guard@casonadams-plugins
 ```
 
@@ -67,13 +67,13 @@ For local, offline command inspection without cloud API latency or cost, `ollama
 
 ## Verification
 
-```bash
+```sh
 omp plugin list
 omp plugin doctor
 ```
 
 ## Upgrading
 
-```bash
+```sh
 omp plugin upgrade guard@casonadams-plugins
 ```
