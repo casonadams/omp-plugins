@@ -6,14 +6,11 @@
   },
   "plugins": [
     {
-      "name": "omp-bash-guard",
+      "name": "guard",
       "description": "Security gatekeeper extension for shell execution using the configured guard/judge model role",
       "category": "security",
-      "source": {
-        "source": "github",
-        "repo": "casonadams/omp-bash-guard"
-      },
-      "homepage": "https://github.com/casonadams/omp-bash-guard"
+      "source": "./plugins/guard",
+      "homepage": "https://github.com/casonadams/omp-plugins"
     }
   ]
 }

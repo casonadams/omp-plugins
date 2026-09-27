@@ -1,0 +1,37 @@
+{
+  "name": "guard",
+  "version": "0.3.1",
+  "description": "Security gatekeeper extension for shell execution using configured guard/judge model roles in oh-my-pi",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "test": "bun test",
+    "test:coverage": "bun test --coverage",
+    "crap": "bun scripts/check-crap.ts",
+    "lint": "oxlint -D complexity",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun run test && bun run crap"
+  },
+  "omp": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "keywords": [
+    "omp-plugin",
+    "oh-my-pi",
+    "security",
+    "guard"
+  ],
+  "dependencies": {
+    "@oh-my-pi/pi-ai": "^18.3.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "oxlint": "^1.85.0",
+    "prettier": "^3.9.9",
+    "typescript": "^7.0.2"
+  }
+}

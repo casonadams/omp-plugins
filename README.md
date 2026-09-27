@@ -25,9 +25,9 @@ omp plugin marketplace list
 
 ## Available Plugins
 
-| Plugin                                                           | Category | Description                                                                                   |
-| ---------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------- |
-| [`omp-bash-guard`](https://github.com/casonadams/omp-bash-guard) | Security | Security gatekeeper extension for shell execution using the configured guard/judge model role |
+| Plugin                     | Category | Description                                                                                   |
+| -------------------------- | -------- | --------------------------------------------------------------------------------------------- |
+| [`guard`](./plugins/guard) | Security | Security gatekeeper extension for shell execution using the configured guard/judge model role |
 
 ## Installing Plugins
 
@@ -42,14 +42,14 @@ _(Or inside an interactive session: `/marketplace discover`)_
 Install a plugin from this catalog:
 
 ```bash
-omp plugin install omp-bash-guard@casonadams-plugins
+omp plugin install guard@casonadams-plugins
 ```
 
-_Note: If you previously installed directly via GitHub, use `--force` to switch
-tracking to the marketplace catalog:_
+_Note: If you previously installed directly via GitHub or an older package name,
+use `--force` to switch tracking to the marketplace catalog:_
 
 ```bash
-omp plugin install omp-bash-guard@casonadams-plugins --force
+omp plugin install guard@casonadams-plugins --force
 ```
 
 ## Updating & Upgrading
@@ -69,10 +69,12 @@ Upgrade installed plugins to their latest versions:
 omp plugin upgrade
 
 # Or upgrade specifically
-omp plugin upgrade omp-bash-guard@casonadams-plugins
+omp plugin upgrade guard@casonadams-plugins
 ```
 
-_(Or inside an interactive session: `/marketplace upgrade omp-bash-guard@casonadams-plugins`)_
+_(Or inside an interactive session:
+`/marketplace upgrade guard@casonadams-plugins`)_
+
 ## Health & Verification
 
 Verify installed plugins and diagnose configuration issues:
@@ -87,5 +89,5 @@ omp plugin doctor
 Remove a plugin:
 
 ```bash
-omp plugin uninstall omp-bash-guard
+omp plugin uninstall guard
 ```
