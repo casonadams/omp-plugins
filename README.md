@@ -7,7 +7,7 @@ Official marketplace catalog for [oh-my-pi](https://github.com/can1357/oh-my-pi)
 
 In your terminal:
 
-```bash
+```sh
 omp plugin marketplace add casonadams/omp-plugins
 ```
 
@@ -19,7 +19,7 @@ Or inside an interactive `omp` session:
 
 Verify configured marketplaces:
 
-```bash
+```sh
 omp plugin marketplace list
 ```
 
@@ -33,7 +33,7 @@ omp plugin marketplace list
 
 Browse available plugins across configured marketplaces:
 
-```bash
+```sh
 omp plugin discover
 ```
 
@@ -41,14 +41,14 @@ _(Or inside an interactive session: `/marketplace discover`)_
 
 Install a plugin from this catalog:
 
-```bash
+```sh
 omp plugin install guard@casonadams-plugins
 ```
 
 _Note: If you previously installed directly via GitHub or an older package name,
 use `--force` to switch tracking to the marketplace catalog:_
 
-```bash
+```sh
 omp plugin install guard@casonadams-plugins --force
 ```
 
@@ -56,7 +56,7 @@ omp plugin install guard@casonadams-plugins --force
 
 Fetch latest catalog metadata from GitHub:
 
-```bash
+```sh
 omp plugin marketplace update casonadams-plugins
 ```
 
@@ -64,7 +64,7 @@ _(Or inside an interactive session: `/marketplace update casonadams-plugins`)_
 
 Upgrade installed plugins to their latest versions:
 
-```bash
+```sh
 # Upgrade all marketplace plugins
 omp plugin upgrade
 
@@ -79,7 +79,7 @@ _(Or inside an interactive session:
 
 Verify installed plugins and diagnose configuration issues:
 
-```bash
+```sh
 omp plugin list
 omp plugin doctor
 ```
@@ -88,6 +88,6 @@ omp plugin doctor
 
 Remove a plugin:
 
-```bash
+```sh
 omp plugin uninstall guard
 ```
