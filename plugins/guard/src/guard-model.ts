@@ -5,6 +5,17 @@ import type { ExtensionContext } from "./types";
 export type GuardModelResolution =
   { model: Model<Api>; apiKey?: string } | { block: true; reason: string };
 
+export function isKeylessModel(model: Model<Api>): boolean {
+  return (
+    model.api === "local-inference" ||
+    model.provider === "ollama" ||
+    model.provider === "local" ||
+    model.provider === "apple" ||
+    model.api === "mock" ||
+    model.provider === "mock"
+  );
+}
+
 export async function resolveGuardModel(ctx?: ExtensionContext): Promise<GuardModelResolution> {
   const model = ctx?.models?.resolve("@guard") ?? ctx?.models?.resolve("@judge");
   if (!model) {
@@ -16,11 +27,7 @@ export async function resolveGuardModel(ctx?: ExtensionContext): Promise<GuardMo
   }
 
   const apiKey = await ctx?.modelRegistry?.getApiKey(model).catch(() => undefined);
-  const isKeyless =
-    model.api === "local-inference" ||
-    model.provider === "ollama" ||
-    model.api === "mock" ||
-    model.provider === "mock";
+  const isKeyless = isKeylessModel(model);
 
   if (!apiKey && !isKeyless) {
     return {
@@ -29,7 +36,7 @@ export async function resolveGuardModel(ctx?: ExtensionContext): Promise<GuardMo
     };
   }
 
-  return { model, apiKey };
+  return { model, apiKey: apiKey || (isKeyless ? "none" : undefined) };
 }
 
 export function parseGuardOutput(text: string): { safe: boolean; reason: string } {
@@ -97,7 +104,12 @@ export async function evaluateCommandSafety(
           },
         ],
       },
-      { apiKey, signal: controller.signal, temperature: 0.0, maxTokens: 256 },
+      {
+        apiKey: apiKey || (isKeylessModel(model) ? "none" : undefined),
+        signal: controller.signal,
+        temperature: 0.0,
+        maxTokens: 256,
+      },
     );
 
     const textBlock = response.content.find(

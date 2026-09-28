@@ -365,16 +365,58 @@ describe("resolveGuardModel", () => {
     }
   });
 
-  test("resolves mock model without requiring API key", async () => {
+  test("resolves mock model with fallback apiKey 'none'", async () => {
     const mockModel = { id: "mock-model", provider: "mock", api: "mock" } as const;
     const res = await resolveGuardModel({
       models: {
         resolve: () => mockModel as unknown as Model<Api>,
       },
     });
-    expect("model" in res).toBe(true);
+    expect(res).toEqual({
+      model: mockModel as unknown as Model<Api>,
+      apiKey: "none",
+    });
   });
 
+  test("resolves ollama model with fallback apiKey 'none'", async () => {
+    const mockModel = {
+      id: "qwen2.5-coder:latest",
+      provider: "ollama",
+      api: "openai-responses",
+    } as const;
+    const res = await resolveGuardModel({
+      models: {
+        resolve: () => mockModel as unknown as Model<Api>,
+      },
+      modelRegistry: {
+        getApiKey: async () => undefined,
+      },
+    });
+    expect(res).toEqual({
+      model: mockModel as unknown as Model<Api>,
+      apiKey: "none",
+    });
+  });
+
+  test("preserves explicit apiKey for keyless model when available", async () => {
+    const mockModel = {
+      id: "qwen2.5-coder:latest",
+      provider: "ollama",
+      api: "openai-responses",
+    } as const;
+    const res = await resolveGuardModel({
+      models: {
+        resolve: () => mockModel as unknown as Model<Api>,
+      },
+      modelRegistry: {
+        getApiKey: async () => "custom-ollama-key",
+      },
+    });
+    expect(res).toEqual({
+      model: mockModel as unknown as Model<Api>,
+      apiKey: "custom-ollama-key",
+    });
+  });
   test("fails when non-local model lacks API key", async () => {
     const mockModel = { id: "gpt-4", provider: "openai", api: "openai-chat" } as const;
     const res = await resolveGuardModel({

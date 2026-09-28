@@ -4,7 +4,12 @@ import type { BlockResult, ExtensionContext, PiExtensionAPI, ToolCallEvent } fro
 import { promptUser } from "./src/ui";
 
 export { CRITICAL_DANGER_REGEX, GUARD_SYSTEM_PROMPT } from "./src/constants";
-export { evaluateCommandSafety, parseGuardOutput, resolveGuardModel } from "./src/guard-model";
+export {
+  evaluateCommandSafety,
+  isKeylessModel,
+  parseGuardOutput,
+  resolveGuardModel,
+} from "./src/guard-model";
 export type * from "./src/types";
 export { promptUser } from "./src/ui";
 
