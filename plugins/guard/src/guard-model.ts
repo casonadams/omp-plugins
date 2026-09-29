@@ -3,8 +3,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { YAML } from "bun";
 import { completeSimple, JUDGMENT_CHAT_MAX_TOKENS, type Api, type Model } from "@oh-my-pi/pi-ai";
-import { GUARD_SYSTEM_PROMPT } from "./constants";
-import type { ExtensionContext, GuardVerdict } from "./types";
+import { GUARD_ROLE_FALLBACKS, GUARD_SYSTEM_PROMPT } from "./constants";
+import type { ExtensionContext, GuardModelCandidate, GuardVerdict } from "./types";
 import {
   type GuardConfig,
   isAllowlistedCommand,
@@ -137,18 +137,10 @@ function fallbackResolveModel(ctx?: ExtensionContext): Model<Api> | undefined {
   );
 }
 
-export async function resolveGuardModel(ctx?: ExtensionContext): Promise<GuardModelResolution> {
-  const model =
-    ctx?.models?.resolve("@guard") ?? ctx?.models?.resolve("@judge") ?? fallbackResolveModel(ctx);
-
-  if (!model) {
-    return {
-      block: true,
-      reason:
-        "No guard or judge model configured! Set `modelRoles.guard: <provider/model>` (or `modelRoles.judge`) in ~/.omp/agent/config.yml before executing shell commands.",
-    };
-  }
-
+async function resolveModelApiKey(
+  model: Model<Api>,
+  ctx?: ExtensionContext,
+): Promise<string | undefined> {
   let apiKey = await ctx?.modelRegistry?.getApiKey(model).catch(() => undefined);
   if (!apiKey && (model.api === "typesafe" || model.provider === "typesafe")) {
     apiKey = process.env.TYPESAFE_API_KEY;
@@ -156,16 +148,70 @@ export async function resolveGuardModel(ctx?: ExtensionContext): Promise<GuardMo
   if (!apiKey && (model.api === "openrouter-decisions" || model.provider === "openrouter")) {
     apiKey = process.env.OPENROUTER_API_KEY;
   }
-  const isKeyless = isKeylessModel(model);
+  return apiKey;
+}
 
-  if (!apiKey && !isKeyless) {
+function resolveRoleModel(role: string, ctx?: ExtensionContext): Model<Api> | undefined {
+  const model = ctx?.models?.resolve(role);
+  if (!model && role === "@guard") {
+    return fallbackResolveModel(ctx);
+  }
+  return model;
+}
+
+export async function resolveGuardCandidates(
+  ctx?: ExtensionContext,
+): Promise<GuardModelCandidate[] | { block: true; reason: string }> {
+  const candidates: GuardModelCandidate[] = [];
+  let firstResolvedModel: Model<Api> | undefined;
+
+  for (const role of GUARD_ROLE_FALLBACKS) {
+    const model = resolveRoleModel(role, ctx);
+    if (!model) continue;
+
+    firstResolvedModel ??= model;
+
+    const isDuplicate = candidates.some(
+      (c) => c.model.provider === model.provider && c.model.id === model.id,
+    );
+    if (isDuplicate) continue;
+
+    const apiKey = await resolveModelApiKey(model, ctx);
+    const isKeyless = isKeylessModel(model);
+
+    if (!apiKey && !isKeyless) continue;
+
+    candidates.push({
+      model,
+      apiKey: apiKey || (isKeyless ? "none" : undefined),
+      role,
+    });
+  }
+
+  if (candidates.length > 0) {
+    return candidates;
+  }
+
+  if (firstResolvedModel) {
     return {
       block: true,
-      reason: `Guard model "${model.provider}/${model.id}" requires an API key, but none was found.`,
+      reason: `Guard model "${firstResolvedModel.provider}/${firstResolvedModel.id}" requires an API key, but none was found.`,
     };
   }
 
-  return { model, apiKey: apiKey || (isKeyless ? "none" : undefined) };
+  return {
+    block: true,
+    reason:
+      "No guard or judge model configured! Set `modelRoles.guard: <provider/model>` (or `modelRoles.judge`) in ~/.omp/agent/config.yml before executing shell commands.",
+  };
+}
+
+export async function resolveGuardModel(ctx?: ExtensionContext): Promise<GuardModelResolution> {
+  const candidates = await resolveGuardCandidates(ctx);
+  if ("block" in candidates) {
+    return candidates;
+  }
+  return { model: candidates[0].model, apiKey: candidates[0].apiKey };
 }
 
 export function parseGuardOutput(text: string): GuardVerdict {
@@ -478,4 +524,38 @@ export async function evaluateCommandSafety(
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+export async function evaluateCommandSafetyWithFallback(
+  candidates: GuardModelCandidate[],
+  command: string,
+  languageOrFetch: string | typeof fetch = "bash",
+  fetchImpl: typeof fetch = fetch,
+  cwd?: string,
+  guardConfig?: GuardConfig,
+): Promise<GuardVerdict> {
+  let lastVerdict: GuardVerdict | undefined;
+
+  for (const candidate of candidates) {
+    const verdict = await evaluateCommandSafety(
+      candidate.model,
+      candidate.apiKey,
+      command,
+      languageOrFetch,
+      fetchImpl,
+      cwd,
+      guardConfig,
+    );
+    if (!verdict.reason.startsWith("Guard model check failed")) {
+      return verdict;
+    }
+    lastVerdict = verdict;
+  }
+
+  return (
+    lastVerdict ?? {
+      safe: false,
+      reason: "Guard model check failed. Command not verified safe.",
+    }
+  );
 }

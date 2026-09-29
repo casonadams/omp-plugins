@@ -6,8 +6,10 @@ import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock
 import { describe, expect, test } from "bun:test";
 import registerBashGuard, {
   CRITICAL_DANGER_REGEX,
+  GUARD_ROLE_FALLBACKS,
   GUARD_SYSTEM_PROMPT,
   evaluateCommandSafety,
+  evaluateCommandSafetyWithFallback,
   evaluateSystemOneSafety,
   getConfiguredModelRole,
   getCriticalDangerAudit,
@@ -17,6 +19,7 @@ import registerBashGuard, {
   parseGuardOutput,
   parseSystemOneOutput,
   promptUser,
+  resolveGuardCandidates,
   resolveGuardModel,
   resolveProductionMarkers,
 } from "../index";
@@ -449,6 +452,47 @@ describe("registerBashGuard", () => {
         "User denied execution: Remote git push modifies remote repository state. (Action: Pushes local commits to remote main branch)",
     });
   });
+
+  test("falls back to smol candidate when guard candidate evaluation fails", async () => {
+    let toolCallHandler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+    const mockPi = {
+      on: (_event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+        toolCallHandler = handler;
+      },
+    };
+
+    registerBashGuard(mockPi as unknown as Parameters<typeof registerBashGuard>[0]);
+
+    const failingGuardMock = createMockModel({
+      id: "failing-guard-model",
+      responses: [{ content: [] }],
+    });
+    const smolMock = createMockModel({
+      id: "smol-model",
+      responses: [
+        {
+          content: [{ type: "text", text: '{"safe": true, "reason": "Smol verified safe"}' }],
+        },
+      ],
+    });
+
+    const result = await toolCallHandler!(
+      { toolName: "bash", input: { command: "cargo test" } },
+      {
+        hasUI: true,
+        models: {
+          resolve: (role: string) => {
+            if (role === "@guard") return failingGuardMock as unknown as Model<Api>;
+            if (role === "@smol") return smolMock as unknown as Model<Api>;
+            return undefined;
+          },
+        },
+      },
+    );
+
+    // Safe command evaluated by fallback model should execute without blocking
+    expect(result).toBeUndefined();
+  });
 });
 
 describe("resolveGuardModel", () => {
@@ -553,6 +597,202 @@ describe("resolveGuardModel", () => {
         delete process.env.OPENROUTER_API_KEY;
       }
     }
+  });
+
+  test("resolves smol role when guard and judge roles are unconfigured", async () => {
+    const mockModel = { id: "smol-model", provider: "ollama", api: "local-inference" } as const;
+    const res = await resolveGuardModel({
+      models: {
+        resolve: (role: string) =>
+          role === "@smol" ? (mockModel as unknown as Model<Api>) : undefined,
+      },
+    });
+    expect("model" in res).toBe(true);
+    if ("model" in res) {
+      expect(res.model.id).toBe("smol-model");
+    }
+  });
+
+  test("falls back from unauthenticated guard model to authenticated judge or smol model", async () => {
+    const guardModel = { id: "gpt-4", provider: "openai", api: "openai-chat" } as const;
+    const smolModel = { id: "smol-model", provider: "ollama", api: "local-inference" } as const;
+    const res = await resolveGuardModel({
+      models: {
+        resolve: (role: string) => {
+          if (role === "@guard") return guardModel as unknown as Model<Api>;
+          if (role === "@smol") return smolModel as unknown as Model<Api>;
+          return undefined;
+        },
+      },
+      modelRegistry: {
+        getApiKey: async (m) => (m.provider === "openai" ? undefined : "none"),
+      },
+    });
+    expect("model" in res).toBe(true);
+    if ("model" in res) {
+      expect(res.model.id).toBe("smol-model");
+    }
+  });
+});
+
+describe("resolveGuardCandidates", () => {
+  test("defines expected fallback role order", () => {
+    expect(GUARD_ROLE_FALLBACKS).toEqual(["@guard", "@judge", "@smol"]);
+  });
+
+  test("includes multiple valid candidates in fallback order and deduplicates identical models", async () => {
+    const guardModel = { id: "qwen-guard", provider: "ollama", api: "local-inference" } as const;
+    const smolModel = { id: "gemini-smol", provider: "google", api: "google-gemini" } as const;
+    const res = await resolveGuardCandidates({
+      models: {
+        resolve: (role: string) => {
+          if (role === "@guard") return guardModel as unknown as Model<Api>;
+          if (role === "@judge") return guardModel as unknown as Model<Api>; // Duplicate of @guard
+          if (role === "@smol") return smolModel as unknown as Model<Api>;
+          return undefined;
+        },
+      },
+      modelRegistry: {
+        getApiKey: async (m) => (m.provider === "google" ? "google-api-key" : undefined),
+      },
+    });
+
+    expect(Array.isArray(res)).toBe(true);
+    if (Array.isArray(res)) {
+      expect(res).toHaveLength(2);
+      expect(res[0].role).toBe("@guard");
+      expect(res[0].model.id).toBe("qwen-guard");
+      expect(res[1].role).toBe("@smol");
+      expect(res[1].model.id).toBe("gemini-smol");
+      expect(res[1].apiKey).toBe("google-api-key");
+    }
+  });
+
+  test("returns block reason when all resolved candidates lack API keys", async () => {
+    const guardModel = { id: "gpt-4", provider: "openai", api: "openai-chat" } as const;
+    const res = await resolveGuardCandidates({
+      models: {
+        resolve: (role: string) =>
+          role === "@guard" ? (guardModel as unknown as Model<Api>) : undefined,
+      },
+      modelRegistry: {
+        getApiKey: async () => undefined,
+      },
+    });
+    expect(res).toEqual({
+      block: true,
+      reason: 'Guard model "openai/gpt-4" requires an API key, but none was found.',
+    });
+  });
+});
+
+describe("evaluateCommandSafetyWithFallback", () => {
+  test("returns immediate verdict when primary candidate succeeds", async () => {
+    const primaryMock = createMockModel({
+      responses: [
+        { content: [{ type: "text", text: '{"safe": true, "reason": "Primary verified safe"}' }] },
+      ],
+    });
+    const fallbackMock = createMockModel({
+      responses: [
+        {
+          content: [{ type: "text", text: '{"safe": false, "reason": "Fallback should not run"}' }],
+        },
+      ],
+    });
+
+    const res = await evaluateCommandSafetyWithFallback(
+      [
+        { model: primaryMock as unknown as Model<Api>, apiKey: "none", role: "@guard" },
+        { model: fallbackMock as unknown as Model<Api>, apiKey: "none", role: "@smol" },
+      ],
+      "git status",
+    );
+
+    expect(res).toEqual({ safe: true, reason: "Primary verified safe" });
+  });
+
+  test("returns intentional unsafe verdict from primary candidate without triggering fallback", async () => {
+    const primaryMock = createMockModel({
+      responses: [
+        {
+          content: [
+            {
+              type: "text",
+              text: '{"safe": false, "action": "Deletes production pod", "reason": "Mutates production environment"}',
+            },
+          ],
+        },
+      ],
+    });
+    const fallbackMock = createMockModel({
+      responses: [
+        {
+          content: [{ type: "text", text: '{"safe": true, "reason": "Fallback should not run"}' }],
+        },
+      ],
+    });
+
+    const res = await evaluateCommandSafetyWithFallback(
+      [
+        { model: primaryMock as unknown as Model<Api>, apiKey: "none", role: "@guard" },
+        { model: fallbackMock as unknown as Model<Api>, apiKey: "none", role: "@smol" },
+      ],
+      "kubectl delete pod prod-api",
+    );
+
+    expect(res).toEqual({
+      safe: false,
+      action: "Deletes production pod",
+      reason: "Mutates production environment",
+    });
+  });
+
+  test("falls back to secondary candidate when primary candidate evaluation fails with error", async () => {
+    const failingMock = createMockModel({
+      responses: [
+        { content: [] }, // Will throw "No text response received from guard model"
+      ],
+    });
+    const fallbackMock = createMockModel({
+      responses: [
+        { content: [{ type: "text", text: '{"safe": true, "reason": "Fallback succeeded"}' }] },
+      ],
+    });
+
+    const res = await evaluateCommandSafetyWithFallback(
+      [
+        { model: failingMock as unknown as Model<Api>, apiKey: "none", role: "@guard" },
+        { model: fallbackMock as unknown as Model<Api>, apiKey: "none", role: "@smol" },
+      ],
+      "npm test",
+    );
+
+    expect(res).toEqual({ safe: true, reason: "Fallback succeeded" });
+  });
+
+  test("returns last error when all candidates fail", async () => {
+    const failingMock1 = createMockModel({ responses: [{ content: [] }] });
+    const failingMock2 = createMockModel({ responses: [{ content: [] }] });
+
+    const res = await evaluateCommandSafetyWithFallback(
+      [
+        { model: failingMock1 as unknown as Model<Api>, apiKey: "none", role: "@guard" },
+        { model: failingMock2 as unknown as Model<Api>, apiKey: "none", role: "@smol" },
+      ],
+      "npm test",
+    );
+
+    expect(res.safe).toBe(false);
+    expect(res.reason).toContain("Guard model check failed");
+  });
+
+  test("returns default failure when candidate list is empty", async () => {
+    const res = await evaluateCommandSafetyWithFallback([], "npm test");
+    expect(res).toEqual({
+      safe: false,
+      reason: "Guard model check failed. Command not verified safe.",
+    });
   });
 });
 

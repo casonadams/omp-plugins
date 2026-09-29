@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import type { SecurityAudit } from "./types";
 
+export const GUARD_ROLE_FALLBACKS = ["@guard", "@judge", "@smol"] as const;
+
 export const CRITICAL_DANGER_REGEX =
   /(\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+([/~]|\.\.|\*)|:\(\)\s*\{\s*:\|:&\s*\};:|\bmkfs\b|\bdd\s+if=|>+\s*\/dev\/sd|\bgit\s+reset\s+--hard\b)/i;
 

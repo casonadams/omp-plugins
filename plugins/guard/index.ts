@@ -1,22 +1,25 @@
 import { isAllowlistedCommand, loadGuardConfig } from "./src/config";
 import { CRITICAL_DANGER_REGEX, getCriticalDangerAudit } from "./src/constants";
-import { evaluateCommandSafety, resolveGuardModel } from "./src/guard-model";
+import { evaluateCommandSafetyWithFallback, resolveGuardCandidates } from "./src/guard-model";
 import type { BlockResult, ExtensionContext, PiExtensionAPI, ToolCallEvent } from "./src/types";
 import { promptUser } from "./src/ui";
 
 export {
   CRITICAL_DANGER_REGEX,
+  GUARD_ROLE_FALLBACKS,
   GUARD_SYSTEM_PROMPT,
   getCriticalDangerAudit,
 } from "./src/constants";
 export {
   evaluateCommandSafety,
+  evaluateCommandSafetyWithFallback,
   evaluateSystemOneSafety,
   getConfiguredModelRole,
   isDecisionModel,
   isKeylessModel,
   parseGuardOutput,
   parseSystemOneOutput,
+  resolveGuardCandidates,
   resolveGuardModel,
 } from "./src/guard-model";
 export { isAllowlistedCommand, loadGuardConfig, resolveProductionMarkers } from "./src/config";
@@ -51,14 +54,13 @@ export default function registerBashGuard(pi: PiExtensionAPI) {
         return;
       }
 
-      const guard = await resolveGuardModel(ctx);
+      const guard = await resolveGuardCandidates(ctx);
       if ("block" in guard) {
         return promptUser(ctx, content, guard.reason, language);
       }
 
-      const verdict = await evaluateCommandSafety(
-        guard.model,
-        guard.apiKey,
+      const verdict = await evaluateCommandSafetyWithFallback(
+        guard,
         content,
         language,
         undefined,
