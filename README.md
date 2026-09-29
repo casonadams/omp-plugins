@@ -3,6 +3,8 @@
 Official marketplace catalog for [oh-my-pi](https://github.com/can1357/oh-my-pi)
 (`omp`) plugins and extensions.
 
+🌐 **Showcase & Catalog Website:** [https://casonadams.github.io/omp-plugins/](https://casonadams.github.io/omp-plugins/)
+
 ## Adding the Marketplace
 
 In your terminal:
