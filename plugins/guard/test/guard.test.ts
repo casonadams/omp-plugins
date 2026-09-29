@@ -6,6 +6,7 @@ import registerBashGuard, {
   GUARD_SYSTEM_PROMPT,
   evaluateCommandSafety,
   evaluateSystemOneSafety,
+  getConfiguredModelRole,
   getCriticalDangerAudit,
   isDecisionModel,
   parseGuardOutput,
@@ -689,6 +690,13 @@ describe("isDecisionModel", () => {
       kind: "chat",
     } as unknown as Model<Api>;
     expect(isDecisionModel(model)).toBe(false);
+  });
+});
+
+describe("getConfiguredModelRole", () => {
+  test("returns string or undefined safely without throwing", () => {
+    const role = getConfiguredModelRole("nonexistent_role_xyz");
+    expect(role === undefined || typeof role === "string").toBe(true);
   });
 });
 

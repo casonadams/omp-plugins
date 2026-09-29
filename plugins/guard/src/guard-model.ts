@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { completeSimple, type Api, type Model } from "@oh-my-pi/pi-ai";
 import { GUARD_SYSTEM_PROMPT } from "./constants";
 import type { ExtensionContext, GuardVerdict } from "./types";
@@ -20,8 +23,103 @@ export function isDecisionModel(model: Model<Api>): boolean {
   return model.api === "typesafe" || model.api === "openrouter-decisions" || model.kind === "judge";
 }
 
+export function getConfiguredModelRole(role: string): string | undefined {
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, ".omp", "agent", "config.yml"),
+    path.join(home, ".omp", "agent", "config.yaml"),
+    path.join(home, ".omp", "config.yml"),
+    path.join(home, ".omp", "config.yaml"),
+  ];
+
+  for (const file of candidates) {
+    try {
+      if (fs.existsSync(file)) {
+        const content = fs.readFileSync(file, "utf8");
+        const match = content.match(new RegExp(`^\\s*${role}:\\s*['"]?([^'#\\s]+)['"]?`, "m"));
+        if (match?.[1]) return match[1].trim();
+      }
+    } catch {
+      // Ignore filesystem errors and continue searching
+    }
+  }
+  return undefined;
+}
+
+function resolveConfiguredRoleName(): string | undefined {
+  return (
+    process.env.GUARD_MODEL ||
+    getConfiguredModelRole("guard") ||
+    getConfiguredModelRole("judge") ||
+    (process.env.TYPESAFE_API_KEY ? "typesafe/jev-latest" : undefined)
+  );
+}
+
+function resolveModelFromRegistry(
+  cleanSpec: string,
+  registry?: ExtensionContext["modelRegistry"],
+): Model<Api> | undefined {
+  if (!registry) return undefined;
+  const [provider, modelId] = cleanSpec.includes("/")
+    ? cleanSpec.split("/")
+    : ["typesafe", cleanSpec];
+
+  const reg = registry as {
+    find?(provider: string, id: string): Model<Api> | undefined;
+    getAvailable?(kind: string): Model<Api>[];
+  };
+
+  if (provider && modelId && typeof reg.find === "function") {
+    const found = reg.find(provider, modelId);
+    if (found) return found;
+  }
+
+  if (typeof reg.getAvailable === "function") {
+    const all = reg.getAvailable("all");
+    return all.find(
+      (m) =>
+        m.id === cleanSpec ||
+        `${m.provider}/${m.id}` === cleanSpec ||
+        (Boolean(provider) && m.provider === provider && m.id === modelId),
+    );
+  }
+
+  return undefined;
+}
+
+function buildFallbackDescriptor(cleanSpec: string): Model<Api> | undefined {
+  if (!cleanSpec.startsWith("typesafe/") && !cleanSpec.includes("jev")) {
+    return undefined;
+  }
+  const [provider, modelId] = cleanSpec.split("/");
+  return {
+    id: modelId || "jev-latest",
+    name: "TypeSafe jev",
+    provider: provider || "typesafe",
+    api: "typesafe",
+    baseUrl: process.env.TYPESAFE_BASE_URL || "https://api.typesafe.ai",
+    kind: "judge",
+  } as unknown as Model<Api>;
+}
+
+function fallbackResolveModel(ctx?: ExtensionContext): Model<Api> | undefined {
+  if (!ctx?.modelRegistry) return undefined;
+
+  const roleName = resolveConfiguredRoleName();
+  if (!roleName) return undefined;
+
+  const cleanSpec = roleName.replace(/:[a-z0-9_-]+$/i, "");
+  return (
+    ctx?.models?.resolve(cleanSpec) ||
+    resolveModelFromRegistry(cleanSpec, ctx?.modelRegistry) ||
+    buildFallbackDescriptor(cleanSpec)
+  );
+}
+
 export async function resolveGuardModel(ctx?: ExtensionContext): Promise<GuardModelResolution> {
-  const model = ctx?.models?.resolve("@guard") ?? ctx?.models?.resolve("@judge");
+  const model =
+    ctx?.models?.resolve("@guard") ?? ctx?.models?.resolve("@judge") ?? fallbackResolveModel(ctx);
+
   if (!model) {
     return {
       block: true,
@@ -30,7 +128,10 @@ export async function resolveGuardModel(ctx?: ExtensionContext): Promise<GuardMo
     };
   }
 
-  const apiKey = await ctx?.modelRegistry?.getApiKey(model).catch(() => undefined);
+  let apiKey = await ctx?.modelRegistry?.getApiKey(model).catch(() => undefined);
+  if (!apiKey && (model.api === "typesafe" || model.provider === "typesafe")) {
+    apiKey = process.env.TYPESAFE_API_KEY;
+  }
   const isKeyless = isKeylessModel(model);
 
   if (!apiKey && !isKeyless) {
