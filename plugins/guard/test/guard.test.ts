@@ -8,11 +8,14 @@ import registerBashGuard, {
   evaluateSystemOneSafety,
   getConfiguredModelRole,
   getCriticalDangerAudit,
+  isAllowlistedCommand,
   isDecisionModel,
+  loadGuardConfig,
   parseGuardOutput,
   parseSystemOneOutput,
   promptUser,
   resolveGuardModel,
+  resolveProductionMarkers,
 } from "../index";
 
 registerMockApi();
@@ -749,6 +752,109 @@ describe("parseSystemOneOutput", () => {
     ).toThrow("Missing safety probability");
   });
 });
+describe("parseSystemOneOutput P1/P2/P3 risk hierarchy", () => {
+  test("returns unsafe verdict when P1 prod risk is above 0.05", () => {
+    const output = parseSystemOneOutput({
+      answers: {
+        p1_prod_impact: { type: "noul", noul: 0.12 },
+        p2_malicious: { type: "noul", noul: 0.0 },
+        p3_local_impact: { type: "choice", choice: "safe_local" },
+      },
+    });
+    expect(output.safe).toBe(false);
+    expect(output.action).toBe("production_mutation");
+    expect(output.reason).toContain("Priority 1 alert");
+  });
+
+  test("returns unsafe verdict when P2 malicious risk is above 0.10", () => {
+    const output = parseSystemOneOutput({
+      answers: {
+        p1_prod_impact: { type: "noul", noul: 0.0 },
+        p2_malicious: { type: "noul", noul: 0.25 },
+        p3_local_impact: { type: "choice", choice: "safe_local" },
+      },
+    });
+    expect(output.safe).toBe(false);
+    expect(output.action).toBe("security_violation");
+    expect(output.reason).toContain("Priority 2 alert");
+  });
+
+  test("returns unsafe verdict when P3 local impact is destructive_wipe", () => {
+    const output = parseSystemOneOutput({
+      answers: {
+        p1_prod_impact: { type: "noul", noul: 0.0 },
+        p2_malicious: { type: "noul", noul: 0.0 },
+        p3_local_impact: { type: "choice", choice: "destructive_wipe" },
+      },
+    });
+    expect(output.safe).toBe(false);
+    expect(output.action).toBe("destructive_wipe");
+    expect(output.reason).toContain("Priority 3 alert");
+  });
+
+  test("returns safe verdict when P1 and P2 are safe and P3 is safe_local or cache_cleanup", () => {
+    const output1 = parseSystemOneOutput({
+      answers: {
+        p1_prod_impact: { type: "noul", noul: 0.01 },
+        p2_malicious: { type: "noul", noul: 0.02 },
+        p3_local_impact: { type: "choice", choice: "safe_local" },
+      },
+    });
+    expect(output1.safe).toBe(true);
+    expect(output1.action).toBe("safe_local");
+
+    const output2 = parseSystemOneOutput({
+      answers: {
+        p1_prod_impact: { type: "noul", noul: 0.0 },
+        p2_malicious: { type: "noul", noul: 0.0 },
+        p3_local_impact: { type: "choice", choice: "cache_cleanup" },
+      },
+    });
+    expect(output2.safe).toBe(true);
+    expect(output2.action).toBe("cache_cleanup");
+  });
+});
+
+describe("config utilities", () => {
+  test("resolveProductionMarkers merges defaults and custom markers", () => {
+    const markers = resolveProductionMarkers({
+      production: {
+        namespaces: ["prd*", "prod-us"],
+        projects: ["my-prod-project"],
+        clusters: ["k8s-prod"],
+        markers: ["live-cluster"],
+      },
+    });
+    expect(markers).toContain("prod");
+    expect(markers).toContain("prd");
+    expect(markers).toContain("prod-us");
+    expect(markers).toContain("my-prod-project");
+    expect(markers).toContain("k8s-prod");
+    expect(markers).toContain("live-cluster");
+  });
+
+  test("isAllowlistedCommand matches regex patterns", () => {
+    const config = {
+      allowlist: ["^git (status|diff)$", "cargo check"],
+    };
+    expect(isAllowlistedCommand("git status", config)).toBe(true);
+    expect(isAllowlistedCommand("git diff", config)).toBe(true);
+    expect(isAllowlistedCommand("cargo check", config)).toBe(true);
+    expect(isAllowlistedCommand("git push origin main", config)).toBe(false);
+    expect(isAllowlistedCommand("rm -rf /", config)).toBe(false);
+  });
+
+  test("isAllowlistedCommand handles empty allowlist safely", () => {
+    expect(isAllowlistedCommand("git status", {})).toBe(false);
+    expect(isAllowlistedCommand("git status", { allowlist: [] })).toBe(false);
+    expect(isAllowlistedCommand("git status", { allowlist: ["invalid[regex"] })).toBe(false);
+  });
+
+  test("loadGuardConfig returns empty object when file not found", () => {
+    const config = loadGuardConfig("/tmp/nonexistent-guard-dir-xyz");
+    expect(config).toEqual({});
+  });
+});
 
 describe("evaluateSystemOneSafety", () => {
   test("queries typesafe default endpoint with apiKey and parses output", async () => {
@@ -987,5 +1093,126 @@ describe("registerBashGuard integration with decision models", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe("registerBashGuard eval tool interception", () => {
+  test("allows safe eval script execution", async () => {
+    let toolCallHandler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+    const mockPi = {
+      on: (_event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+        toolCallHandler = handler;
+      },
+    };
+
+    registerBashGuard(mockPi as unknown as Parameters<typeof registerBashGuard>[0]);
+
+    const mock = createMockModel({
+      responses: [
+        {
+          content: [{ type: "text", text: '{"safe": true, "reason": "Pure computational logic"}' }],
+        },
+      ],
+    });
+
+    const result = await toolCallHandler!(
+      { toolName: "eval", input: { language: "js", code: "const x = 1 + 1;" } },
+      {
+        hasUI: true,
+        models: {
+          resolve: () => mock as unknown as Model<Api>,
+        },
+      },
+    );
+
+    expect(result).toBeUndefined();
+  });
+
+  test("blocks critical danger inside eval code", async () => {
+    let toolCallHandler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+    const mockPi = {
+      on: (_event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+        toolCallHandler = handler;
+      },
+    };
+
+    registerBashGuard(mockPi as unknown as Parameters<typeof registerBashGuard>[0]);
+
+    const mockAskDialog = async () => ({
+      kind: "submit",
+      results: [{ selectedOptions: ["Cancel"] }],
+    });
+
+    const result = await toolCallHandler!(
+      { toolName: "eval", input: { language: "js", code: "await $`rm -rf /`" } },
+      {
+        hasUI: true,
+        ui: {
+          askDialog: mockAskDialog,
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      block: true,
+      reason:
+        "User denied execution: Critical destructive filesystem wipe detected. (Action: Recursively deletes root, home, parent, or wildcard files)",
+    });
+  });
+
+  test("blocks unsafe eval script in headless mode", async () => {
+    let toolCallHandler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+    const mockPi = {
+      on: (_event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+        toolCallHandler = handler;
+      },
+    };
+
+    registerBashGuard(mockPi as unknown as Parameters<typeof registerBashGuard>[0]);
+
+    const mock = createMockModel({
+      responses: [
+        {
+          content: [
+            {
+              type: "text",
+              text: '{"safe": false, "reason": "Executes shell commands to access cloud keys."}',
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await toolCallHandler!(
+      {
+        toolName: "eval",
+        input: { language: "py", code: "import os; os.system('cat ~/.aws/credentials')" },
+      },
+      {
+        hasUI: false,
+        models: {
+          resolve: () => mock as unknown as Model<Api>,
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      block: true,
+      reason:
+        "[Eval Guard] Blocked unsafe script (headless mode): Executes shell commands to access cloud keys.",
+    });
+  });
+
+  test("ignores eval tool calls with missing or empty code", async () => {
+    let toolCallHandler: ((event: unknown, ctx?: unknown) => Promise<unknown>) | undefined;
+    const mockPi = {
+      on: (_event: string, handler: (event: unknown, ctx?: unknown) => Promise<unknown>) => {
+        toolCallHandler = handler;
+      },
+    };
+
+    registerBashGuard(mockPi as unknown as Parameters<typeof registerBashGuard>[0]);
+    expect(await toolCallHandler!({ toolName: "eval", input: { code: "" } })).toBeUndefined();
+    expect(await toolCallHandler!({ toolName: "eval", input: {} })).toBeUndefined();
   });
 });

@@ -2,7 +2,7 @@
 
 Security gatekeeper extension and plugin for [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`).
 
-Evaluates shell commands before execution and classifies their risk against software engineering, cloud infrastructure, and database boundaries using your configured **guard** or **judge** model.
+Evaluates shell commands and eval scripts (Python/IPython and JavaScript/Bun) before execution and classifies their risk against software engineering, cloud infrastructure, and database boundaries using your configured **guard** or **judge** model.
 
 ## Quick Install
 
@@ -18,6 +18,7 @@ omp plugin install guard@casonadams-plugins
 - **Fail-Safe Enforcement**: If no guard/judge model is configured or credentials are missing, commands cannot run silently; execution is halted with an alert.
 - **Interactive TUI Ask Dialog**: Flagged commands present the native oh-my-pi ask dialog displaying the command's action summary and risk assessment, defaulting to `Proceed` alongside scrollable code preview and custom feedback via `Other`.
 - **Zero-Latency Critical Regex**: Instant interception for catastrophic destructive wipes (`rm -rf /`, `mkfs`, raw device writes, fork bombs, hard resets).
+- **Unified Exec Guarding**: Intercepts both shell commands (`bash`) and persistent kernel scripts (`eval` in Bun and IPython) to prevent execution-bypass loopholes.
 - **Developer-Friendly Boundaries**: Safe local operations (builds, tests, linters, repo file edits, diagnostics) are classified as safe without interrupting flow.
 
 ## Configuration
@@ -41,6 +42,39 @@ By default, oh-my-pi prompts for manual human approval on tool executions. When 
 
 - **Zero Interruption for Safe Work**: Benign developer actions (builds, tests, linters, git inspections, file edits) execute instantly without manual confirm prompts.
 - **Targeted Interception**: The guard pauses execution only when a command is destructive, mutates cloud or database infrastructure, exfiltrates secrets, or poses a security risk.
+
+### Production & Environment Protection (`.guard.yml`)
+
+The guard plugin loads `.guard.yml` from the active repository root (falling back to `~/.config/omp-guard/config.yml` globally) to enforce risk boundaries without touching `omp`'s internal configuration:
+
+```yaml
+production:
+  # Namespaces, projects, or clusters that must never be mutated without confirmation
+  namespaces:
+    - "prod*"
+    - "prd*"
+    - "kube-system"
+  projects:
+    - "*prod*"
+    - "*production*"
+  clusters:
+    - "gke-prod-*"
+  markers:
+    - "prod"
+    - "prd"
+    - "production"
+    - "live"
+
+allowlist:
+  # Fast regex bypass for trusted non-mutating inspections
+  - "^(git (status|diff|log)|cargo (check|test)|npm test)$"
+```
+
+#### Three-Tiered Risk Hierarchy
+
+1. **Priority 1 (Production Mutation)**: Any command altering, deleting, or restarting workloads in production Kubernetes namespaces (`prod`, `prd`), cloud projects, or databases triggers an immediate alert.
+2. **Priority 2 (Malicious Activity)**: Secret exfiltration (`.env`, `~/.ssh`, `~/.aws`), piping remote URLs to shell interpreters, or privilege escalation.
+3. **Priority 3 (Local Workspace Preservation)**: Destructive git history resets and untracked file wipes require confirmation, while benign builds and temporary cache cleanups (`target/`, `.cache`) pass silently.
 
 ### Keybindings (Vim `j`/`k` & `Tab` Navigation)
 

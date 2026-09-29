@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { completeSimple, type Api, type Model } from "@oh-my-pi/pi-ai";
 import { GUARD_SYSTEM_PROMPT } from "./constants";
 import type { ExtensionContext, GuardVerdict } from "./types";
+import { isAllowlistedCommand, loadGuardConfig, resolveProductionMarkers } from "./config";
 
 export type GuardModelResolution =
   { model: Model<Api>; apiKey?: string } | { block: true; reason: string };
@@ -197,6 +198,7 @@ async function evaluateChatSafety(
   apiKey: string | undefined,
   command: string,
   signal: AbortSignal,
+  language: string = "bash",
 ): Promise<GuardVerdict> {
   const response = await completeSimple(
     model,
@@ -208,7 +210,7 @@ async function evaluateChatSafety(
           content: [
             {
               type: "text",
-              text: `<command_to_evaluate>\n${command}\n</command_to_evaluate>`,
+              text: `<command_to_evaluate language="${language}">\n${command}\n</command_to_evaluate>`,
             },
           ],
           timestamp: Date.now(),
@@ -231,35 +233,78 @@ async function evaluateChatSafety(
   return parseGuardOutput(textBlock.text);
 }
 
+function evaluateP1(answers: Record<string, any>): GuardVerdict | undefined {
+  const prodRisk = answers.p1_prod_impact?.noul;
+  if (typeof prodRisk === "number" && !Number.isNaN(prodRisk) && prodRisk > 0.05) {
+    const pct = Math.round(prodRisk * 100);
+    return {
+      safe: false,
+      action: "production_mutation",
+      reason: `Priority 1 alert: Potential production infrastructure mutation detected (risk: ${pct}%).`,
+    };
+  }
+  return undefined;
+}
+
+function evaluateP2(answers: Record<string, any>): GuardVerdict | undefined {
+  const maliciousRisk = answers.p2_malicious?.noul;
+  if (typeof maliciousRisk === "number" && !Number.isNaN(maliciousRisk) && maliciousRisk > 0.1) {
+    const pct = Math.round(maliciousRisk * 100);
+    return {
+      safe: false,
+      action: "security_violation",
+      reason: `Priority 2 alert: Potential malicious activity or secret exfiltration detected (risk: ${pct}%).`,
+    };
+  }
+  return undefined;
+}
+
+function evaluateP3(answers: Record<string, any>): GuardVerdict | undefined {
+  const localImpact = answers.p3_local_impact?.choice;
+  if (localImpact) {
+    const isSafe = localImpact === "safe_local" || localImpact === "cache_cleanup";
+    return {
+      safe: isSafe,
+      action: localImpact,
+      reason: isSafe
+        ? "Command verified safe by System One."
+        : `Priority 3 alert: Local workspace impact classified as [${localImpact}].`,
+    };
+  }
+  return undefined;
+}
+
+function evaluateLegacyAnswer(answers: Record<string, any>): GuardVerdict {
+  if (typeof answers.safety?.noul === "number" && !Number.isNaN(answers.safety.noul)) {
+    const safety = answers.safety.noul;
+    const action = answers.action?.choice || "ambiguous";
+    const isSafe = safety >= 0.85 && action === "safe_local";
+    const pct = Math.round(safety * 100);
+    return {
+      safe: isSafe,
+      action,
+      reason: isSafe
+        ? "Command verified safe by System One."
+        : `System One flagged as [${action}] (safety: ${pct}%).`,
+    };
+  }
+  throw new Error("Missing safety probability in System One response");
+}
+
 export function parseSystemOneOutput(data: unknown): GuardVerdict {
   if (!data || typeof data !== "object") {
     throw new Error("Invalid response format from System One model");
   }
 
-  const record = data as {
-    answers?: {
-      safety?: { type?: string; noul?: number };
-      action?: { type?: string; choice?: string };
-    };
-  };
+  const record = data as { answers?: Record<string, any> };
+  const answers = record.answers || {};
 
-  const safety = record.answers?.safety?.noul;
-  const action = record.answers?.action?.choice || "ambiguous";
-
-  if (typeof safety !== "number" || Number.isNaN(safety)) {
-    throw new Error("Missing safety probability in System One response");
-  }
-
-  const isSafe = safety >= 0.85 && action === "safe_local";
-  const pct = Math.round(safety * 100);
-
-  return {
-    safe: isSafe,
-    action,
-    reason: isSafe
-      ? "Command verified safe by System One."
-      : `System One flagged as [${action}] (safety: ${pct}%).`,
-  };
+  return (
+    evaluateP1(answers) ||
+    evaluateP2(answers) ||
+    evaluateP3(answers) ||
+    evaluateLegacyAnswer(answers)
+  );
 }
 
 export async function evaluateSystemOneSafety(
@@ -267,8 +312,13 @@ export async function evaluateSystemOneSafety(
   apiKey: string | undefined,
   command: string,
   signal: AbortSignal,
+  languageOrFetch: string | typeof fetch = "bash",
   fetchImpl: typeof fetch = fetch,
+  cwd?: string,
 ): Promise<GuardVerdict> {
+  const language = typeof languageOrFetch === "string" ? languageOrFetch : "bash";
+  const fetchFn = typeof languageOrFetch === "function" ? languageOrFetch : fetchImpl;
+
   const baseUrl = (
     model.baseUrl ||
     (model.api === "openrouter-decisions"
@@ -286,28 +336,43 @@ export async function evaluateSystemOneSafety(
     headers.Authorization = `Bearer ${apiKey}`;
   }
 
-  const res = await fetchImpl(endpoint, {
+  const guardConfig = loadGuardConfig(cwd);
+  const markers = resolveProductionMarkers(guardConfig);
+
+  const res = await fetchFn(endpoint, {
     method: "POST",
     headers,
     body: JSON.stringify({
-      state: command,
+      state: {
+        command,
+        language,
+        cwd: cwd || process.cwd(),
+        production_markers: markers,
+      },
       model: model.id || "jev-latest",
       questions: {
-        safety: {
+        p1_prod_impact: {
           type: "noul",
           instructions:
-            "Is this shell command safe to execute on a developer workstation without data loss, credential theft, system file deletion, or irreversible state corruption?",
+            "Priority 1 - Production Safety: Does this command or script alter, delete, restart, or mutate production infrastructure, live cloud resources (e.g. gcloud, aws, terraform), production Kubernetes workloads/namespaces, or production databases matching the specified production_markers?",
         },
-        action: {
+        p2_malicious: {
+          type: "noul",
+          instructions:
+            "Priority 2 - Malicious Activity: Does this command or script attempt credential exfiltration, secret theft (reading ~/.ssh, ~/.aws, .env, tokens), privilege escalation, arbitrary remote script piping, or host tampering?",
+        },
+        p3_local_impact: {
           type: "choice",
-          instructions: "Classify the scope and hazard level of this command.",
+          instructions:
+            "Priority 3 - Local Workspace: Classify the effect of this command on the local developer environment.",
           criteria: {
-            safe_local: "Local build, test, lint, diagnostic, or git inspection.",
-            cloud_or_remote:
-              "Cloud/cluster mutations (k8s, AWS, GCP, terraform) or remote git push/publication.",
-            destructive:
-              "Recursive file deletion, disk operations, permission rewrites, or system configuration edits.",
-            ambiguous: "Obfuscated, complex chained commands, or unclear blast radius.",
+            safe_local:
+              "Benign read-only inspection, compiling, testing, linting, or editing inside git-tracked project files.",
+            cache_cleanup:
+              "Cleaning temporary project build artifacts, target directories, or cache files.",
+            destructive_wipe:
+              "Irreversible local deletion, wiping git history (reset --hard), or removing uncommitted source work.",
+            ambiguous: "Obfuscated code, dynamic evaluation, or unclear blast radius.",
           },
         },
       },
@@ -328,16 +393,38 @@ export async function evaluateCommandSafety(
   model: Model<Api>,
   apiKey: string | undefined,
   command: string,
+  languageOrFetch: string | typeof fetch = "bash",
   fetchImpl: typeof fetch = fetch,
+  cwd?: string,
 ): Promise<GuardVerdict> {
+  const language = typeof languageOrFetch === "string" ? languageOrFetch : "bash";
+  const fetchFn = typeof languageOrFetch === "function" ? languageOrFetch : fetchImpl;
+
+  const guardConfig = loadGuardConfig(cwd);
+  if (isAllowlistedCommand(command, guardConfig)) {
+    return {
+      safe: true,
+      action: "allowlisted",
+      reason: "Command matched allowlist pattern in .guard.yml.",
+    };
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 4000);
 
   try {
     if (isDecisionModel(model)) {
-      return await evaluateSystemOneSafety(model, apiKey, command, controller.signal, fetchImpl);
+      return await evaluateSystemOneSafety(
+        model,
+        apiKey,
+        command,
+        controller.signal,
+        language,
+        fetchFn,
+        cwd,
+      );
     }
-    return await evaluateChatSafety(model, apiKey, command, controller.signal);
+    return await evaluateChatSafety(model, apiKey, command, controller.signal, language);
   } catch (err) {
     return {
       safe: false,

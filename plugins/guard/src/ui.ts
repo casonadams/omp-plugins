@@ -1,76 +1,110 @@
 import type { BlockResult, ExtensionContext, SecurityAudit } from "./types";
 
-export async function promptUser(
-  ctx: ExtensionContext | undefined,
+interface FormattedAudit {
+  auditBlock: string;
+  auditSummary: string;
+}
+
+function formatAudit(audit: string | SecurityAudit): FormattedAudit {
+  const normalized: SecurityAudit = typeof audit === "string" ? { reason: audit } : audit;
+  const auditBlock = normalized.action
+    ? `Action: ${normalized.action}\nRisk: ${normalized.reason}`
+    : normalized.reason;
+  const auditSummary = normalized.action
+    ? `${normalized.reason} (Action: ${normalized.action})`
+    : normalized.reason;
+  return { auditBlock, auditSummary };
+}
+
+async function promptViaAskDialog(
+  ui: NonNullable<ExtensionContext["ui"]>,
+  header: string,
   command: string,
-  audit: string | SecurityAudit,
+  audit: FormattedAudit,
+  language: string,
 ): Promise<BlockResult | void> {
-  const normalizedAudit: SecurityAudit = typeof audit === "string" ? { reason: audit } : audit;
-  const auditBlock = normalizedAudit.action
-    ? `Action: ${normalizedAudit.action}\nRisk: ${normalizedAudit.reason}`
-    : normalizedAudit.reason;
-  const auditSummary = normalizedAudit.action
-    ? `${normalizedAudit.reason} (Action: ${normalizedAudit.action})`
-    : normalizedAudit.reason;
+  const res = await ui.askDialog!([
+    {
+      id: "guard_approval",
+      header,
+      question: `Security Audit:\n${audit.auditBlock.trim()}\n \nAllow execution?`,
+      recommended: 0,
+      options: [
+        {
+          label: "Proceed",
+          description: `Execute the ${language === "bash" ? "command" : "script"}`,
+          preview: `\`\`\`${language}\n${command}\n\`\`\``,
+        },
+        {
+          label: "Cancel",
+          description: "Block execution",
+        },
+      ],
+    },
+  ]);
 
-  if (!ctx?.hasUI) {
-    return {
-      block: true,
-      reason: `[Bash Guard] Blocked unsafe command (headless mode): ${auditSummary}`,
-    };
-  }
-
-  if (typeof ctx.ui?.askDialog === "function") {
-    const res = await ctx.ui.askDialog([
-      {
-        id: "bash_guard_approval",
-        header: "Bash Guard",
-        question: `Security Audit:\n${auditBlock.trim()}\n \nAllow execution?`,
-        recommended: 0,
-        options: [
-          {
-            label: "Proceed",
-            description: "Execute the command",
-            preview: `\`\`\`bash\n${command}\n\`\`\``,
-          },
-          {
-            label: "Cancel",
-            description: "Block execution",
-          },
-        ],
-      },
-    ]);
-
-    if (res?.kind === "submit") {
-      const selected = res.results[0]?.selectedOptions[0];
-      if (selected === "Proceed") {
-        return;
-      }
-      if (res.results[0]?.customInput) {
-        return {
-          block: true,
-          reason: `User denied execution with feedback: ${res.results[0].customInput}`,
-        };
-      }
+  if (res?.kind === "submit") {
+    const selected = res.results[0]?.selectedOptions[0];
+    if (selected === "Proceed") return;
+    if (res.results[0]?.customInput) {
+      return {
+        block: true,
+        reason: `User denied execution with feedback: ${res.results[0].customInput}`,
+      };
     }
-
-    return {
-      block: true,
-      reason: `User denied execution: ${auditSummary}`,
-    };
-  }
-
-  if (typeof ctx.ui?.confirm === "function") {
-    const approved = await ctx.ui.confirm(
-      "Bash Guard",
-      `Security Audit:\n${auditBlock}\n\nCommand:\n$ ${command}\n\nAllow execution?`,
-    );
-    if (approved) return;
-    return { block: true, reason: `User denied execution: ${auditSummary}` };
   }
 
   return {
     block: true,
-    reason: `[Bash Guard] Blocked unsafe command (headless mode): ${auditSummary}`,
+    reason: `User denied execution: ${audit.auditSummary}`,
+  };
+}
+
+async function promptViaConfirm(
+  ui: NonNullable<ExtensionContext["ui"]>,
+  header: string,
+  command: string,
+  audit: FormattedAudit,
+  language: string,
+): Promise<BlockResult | void> {
+  const approved = await ui.confirm!(
+    header,
+    `Security Audit:\n${audit.auditBlock}\n\n${language === "bash" ? "Command:\n$" : "Script:"} ${command}\n\nAllow execution?`,
+  );
+  if (approved) return;
+  return { block: true, reason: `User denied execution: ${audit.auditSummary}` };
+}
+
+export async function promptUser(
+  ctx: ExtensionContext | undefined,
+  command: string,
+  audit: string | SecurityAudit,
+  language: string = "bash",
+): Promise<BlockResult | void> {
+  const formatted = formatAudit(audit);
+  const guardHeader = language === "bash" ? "Bash Guard" : "Eval Guard";
+  const blockedPrefix =
+    language === "bash"
+      ? "[Bash Guard] Blocked unsafe command"
+      : "[Eval Guard] Blocked unsafe script";
+
+  if (!ctx?.hasUI) {
+    return {
+      block: true,
+      reason: `${blockedPrefix} (headless mode): ${formatted.auditSummary}`,
+    };
+  }
+
+  if (typeof ctx.ui?.askDialog === "function") {
+    return promptViaAskDialog(ctx.ui, guardHeader, command, formatted, language);
+  }
+
+  if (typeof ctx.ui?.confirm === "function") {
+    return promptViaConfirm(ctx.ui, guardHeader, command, formatted, language);
+  }
+
+  return {
+    block: true,
+    reason: `${blockedPrefix} (headless mode): ${formatted.auditSummary}`,
   };
 }
