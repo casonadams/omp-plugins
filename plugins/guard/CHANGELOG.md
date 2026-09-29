@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/casonadams/omp-plugins/compare/guard-v0.4.1...guard-v0.5.0) (2026-09-29)
+
+
+### Features
+
+* **guard:** explain command action in audit notice and default prompt to proceed ([0553003](https://github.com/casonadams/omp-plugins/commit/0553003cea9bf283c8dda0f26bbcf17313b30d7c))
+
 ## [0.4.1](https://github.com/casonadams/omp-plugins/compare/guard-v0.4.0...guard-v0.4.1) (2026-09-28)
 
 
