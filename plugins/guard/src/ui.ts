@@ -1,19 +1,23 @@
-import type { BlockResult, ExtensionContext } from "./types";
-
-function blockedHeadless(reason: string): BlockResult {
-  return {
-    block: true,
-    reason: `[Bash Guard] Blocked unsafe command (headless mode): ${reason}`,
-  };
-}
+import type { BlockResult, ExtensionContext, SecurityAudit } from "./types";
 
 export async function promptUser(
   ctx: ExtensionContext | undefined,
   command: string,
-  reason: string,
+  audit: string | SecurityAudit,
 ): Promise<BlockResult | void> {
+  const normalizedAudit: SecurityAudit = typeof audit === "string" ? { reason: audit } : audit;
+  const auditBlock = normalizedAudit.action
+    ? `Action: ${normalizedAudit.action}\nRisk: ${normalizedAudit.reason}`
+    : normalizedAudit.reason;
+  const auditSummary = normalizedAudit.action
+    ? `${normalizedAudit.reason} (Action: ${normalizedAudit.action})`
+    : normalizedAudit.reason;
+
   if (!ctx?.hasUI) {
-    return blockedHeadless(reason);
+    return {
+      block: true,
+      reason: `[Bash Guard] Blocked unsafe command (headless mode): ${auditSummary}`,
+    };
   }
 
   if (typeof ctx.ui?.askDialog === "function") {
@@ -21,8 +25,8 @@ export async function promptUser(
       {
         id: "bash_guard_approval",
         header: "Bash Guard",
-        question: `Security Audit:\n${reason.trim()}\n \nAllow execution?`,
-        recommended: 1,
+        question: `Security Audit:\n${auditBlock.trim()}\n \nAllow execution?`,
+        recommended: 0,
         options: [
           {
             label: "Proceed",
@@ -52,18 +56,21 @@ export async function promptUser(
 
     return {
       block: true,
-      reason: `User denied execution: ${reason}`,
+      reason: `User denied execution: ${auditSummary}`,
     };
   }
 
   if (typeof ctx.ui?.confirm === "function") {
     const approved = await ctx.ui.confirm(
       "Bash Guard",
-      `Security Audit:\n${reason}\n\nCommand:\n$ ${command}\n\nAllow execution?`,
+      `Security Audit:\n${auditBlock}\n\nCommand:\n$ ${command}\n\nAllow execution?`,
     );
     if (approved) return;
-    return { block: true, reason: `User denied execution: ${reason}` };
+    return { block: true, reason: `User denied execution: ${auditSummary}` };
   }
 
-  return blockedHeadless(reason);
+  return {
+    block: true,
+    reason: `[Bash Guard] Blocked unsafe command (headless mode): ${auditSummary}`,
+  };
 }

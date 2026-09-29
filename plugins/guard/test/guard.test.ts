@@ -5,6 +5,7 @@ import registerBashGuard, {
   CRITICAL_DANGER_REGEX,
   GUARD_SYSTEM_PROMPT,
   evaluateCommandSafety,
+  getCriticalDangerAudit,
   parseGuardOutput,
   promptUser,
   resolveGuardModel,
@@ -74,7 +75,7 @@ describe("registerBashGuard", () => {
         "[Bash Guard] Blocked unsafe command (headless mode): No guard or judge model configured! Set `modelRoles.guard: <provider/model>` (or `modelRoles.judge`) in ~/.omp/agent/config.yml before executing shell commands.",
     });
   });
-  test("presents askDialog with question, recommended Cancel, and Proceed preview with scroller", async () => {
+  test("presents askDialog with question, recommended Proceed, and Proceed preview with scroller", async () => {
     let toolCallHandler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
     const mockPi = {
       on: (_event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
@@ -113,8 +114,14 @@ describe("registerBashGuard", () => {
     }>;
     expect(questions[0]?.header).toBe("Bash Guard");
     expect(questions[0]?.question).toContain("Security Audit:");
+    expect(questions[0]?.question).toContain(
+      "Action: Recursively deletes root, home, parent, or wildcard files",
+    );
+    expect(questions[0]?.question).toContain(
+      "Risk: Critical destructive filesystem wipe detected.",
+    );
     expect(questions[0]?.question).toContain("Allow execution?");
-    expect(questions[0]?.recommended).toBe(1);
+    expect(questions[0]?.recommended).toBe(0);
     expect(questions[0]?.options[0]?.label).toBe("Proceed");
     expect(questions[0]?.options[0]?.preview).toBe("```bash\nrm -rf /\n```");
     expect(questions[0]?.options[1]?.label).toBe("Cancel");
@@ -147,7 +154,7 @@ describe("registerBashGuard", () => {
     expect(result).toEqual({
       block: true,
       reason:
-        "User denied execution: Critical destructive or irreversible infrastructure action detected.",
+        "User denied execution: Critical destructive filesystem wipe detected. (Action: Recursively deletes root, home, parent, or wildcard files)",
     });
   });
 
@@ -237,7 +244,7 @@ describe("registerBashGuard", () => {
     expect(result).toEqual({
       block: true,
       reason:
-        "User denied execution: Critical destructive or irreversible infrastructure action detected.",
+        "User denied execution: Critical destructive filesystem wipe detected. (Action: Recursively deletes root, home, parent, or wildcard files)",
     });
   });
 
@@ -348,6 +355,61 @@ describe("registerBashGuard", () => {
       reason: "User denied execution: Remote git push modifies remote repository state.",
     });
   });
+
+  test("prompts user with action and reason when guard model provides both", async () => {
+    let toolCallHandler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+    const mockPi = {
+      on: (_event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+        toolCallHandler = handler;
+      },
+    };
+
+    registerBashGuard(mockPi as unknown as Parameters<typeof registerBashGuard>[0]);
+
+    const mock = createMockModel({
+      responses: [
+        {
+          content: [
+            {
+              type: "text",
+              text: '{"safe": false, "action": "Pushes local commits to remote main branch", "reason": "Remote git push modifies remote repository state."}',
+            },
+          ],
+        },
+      ],
+    });
+
+    let promptedQuestion: string | undefined;
+    const mockAskDialog = async (questions: unknown) => {
+      const qs = questions as Array<{ question: string }>;
+      promptedQuestion = qs[0]?.question;
+      return {
+        kind: "submit",
+        results: [{ selectedOptions: ["Cancel"] }],
+      };
+    };
+
+    const result = await toolCallHandler!(
+      { toolName: "bash", input: { command: "git push origin main" } },
+      {
+        hasUI: true,
+        ui: {
+          askDialog: mockAskDialog,
+        },
+        models: {
+          resolve: () => mock as unknown as Model<Api>,
+        },
+      },
+    );
+
+    expect(promptedQuestion).toContain("Action: Pushes local commits to remote main branch");
+    expect(promptedQuestion).toContain("Risk: Remote git push modifies remote repository state.");
+    expect(result).toEqual({
+      block: true,
+      reason:
+        "User denied execution: Remote git push modifies remote repository state. (Action: Pushes local commits to remote main branch)",
+    });
+  });
 });
 
 describe("resolveGuardModel", () => {
@@ -443,11 +505,21 @@ describe("evaluateCommandSafety", () => {
 });
 
 describe("parseGuardOutput", () => {
-  test("parses clean JSON format", () => {
+  test("parses clean JSON format with action", () => {
+    const res = parseGuardOutput(
+      '{"safe": false, "action": "Deletes pod", "reason": "Mutates cluster state"}',
+    );
+    expect(res).toEqual({
+      safe: false,
+      action: "Deletes pod",
+      reason: "Mutates cluster state",
+    });
+  });
+
+  test("parses clean JSON format without action for backward compatibility", () => {
     const res = parseGuardOutput('{"safe": true, "reason": "read-only"}');
     expect(res).toEqual({ safe: true, reason: "read-only" });
   });
-
   test("strips thinking tags and parses wrapped JSON", () => {
     const res = parseGuardOutput(
       '<think>Evaluating...</think>\n{"safe": false, "reason": "deletes cluster pod"}',
@@ -499,6 +571,64 @@ describe("promptUser", () => {
       reason: "[Bash Guard] Blocked unsafe command (headless mode): Unsafe action",
     });
   });
+
+  test("formats action and reason when SecurityAudit object is provided", async () => {
+    const result = await promptUser({ hasUI: true, ui: {} }, "git push origin main", {
+      action: "Pushes commits",
+      reason: "Modifies remote state",
+    });
+    expect(result).toEqual({
+      block: true,
+      reason:
+        "[Bash Guard] Blocked unsafe command (headless mode): Modifies remote state (Action: Pushes commits)",
+    });
+  });
+});
+
+describe("getCriticalDangerAudit", () => {
+  test("describes rm -rf wipe pattern", () => {
+    const audit = getCriticalDangerAudit("rm -rf /");
+    expect(audit.action).toContain("Recursively deletes");
+    expect(audit.reason).toContain("Critical destructive filesystem wipe");
+  });
+
+  test("describes git reset --hard pattern", () => {
+    const audit = getCriticalDangerAudit("git reset --hard HEAD~1");
+    expect(audit.action).toContain("Resets git working tree");
+    expect(audit.reason).toContain("Irreversible loss");
+  });
+
+  test("describes fork bomb pattern", () => {
+    const audit = getCriticalDangerAudit(":(){ :|:& };:");
+    expect(audit.action).toContain("fork bomb");
+    expect(audit.reason).toContain("denial of service");
+  });
+
+  test("describes mkfs pattern", () => {
+    const audit = getCriticalDangerAudit("mkfs.ext4 /dev/sdb");
+    expect(audit.action).toContain("Formats disk partition");
+    expect(audit.reason).toContain("Critical destructive drive format");
+  });
+
+  test("describes dd if= pattern", () => {
+    const audit = getCriticalDangerAudit("dd if=/dev/zero of=/dev/sda");
+    expect(audit.action).toContain("raw byte copying or writing");
+    expect(audit.reason).toContain("Potential low-level raw disk or partition overwrite");
+  });
+
+  test("describes raw device redirect pattern", () => {
+    const audit = getCriticalDangerAudit("echo 0 > /dev/sda");
+    expect(audit.action).toContain("storage device node");
+    expect(audit.reason).toContain("Direct raw storage device overwrite detected");
+  });
+
+  test("returns fallback audit when command matches general critical danger", () => {
+    const audit = getCriticalDangerAudit("unknown-danger");
+    expect(audit.action).toBe("Executes high-risk destructive shell command");
+    expect(audit.reason).toBe(
+      "Critical destructive or irreversible infrastructure action detected.",
+    );
+  });
 });
 
 describe("GUARD_SYSTEM_PROMPT", () => {
@@ -517,6 +647,8 @@ describe("GUARD_SYSTEM_PROMPT", () => {
     expect(GUARD_SYSTEM_PROMPT).toContain("<examples>");
     expect(GUARD_SYSTEM_PROMPT).toContain("</examples>");
     expect(GUARD_SYSTEM_PROMPT).toContain("<output_format>");
-    expect(GUARD_SYSTEM_PROMPT).toContain('{"safe": boolean, "reason": "concise explanation"}');
+    expect(GUARD_SYSTEM_PROMPT).toContain(
+      '{"safe": boolean, "action": "concise description of what the command does", "reason": "concise explanation of safety or risk"}',
+    );
   });
 });

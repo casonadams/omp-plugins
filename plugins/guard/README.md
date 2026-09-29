@@ -16,7 +16,7 @@ omp plugin install guard@casonadams-plugins
 
 - **Decoupled Model Configuration**: Uses your configured `guard` model role in `config.yml` (falls back to `judge`). Works with any provider supported by oh-my-pi (Ollama, Anthropic, OpenAI, Gemini, Bedrock, etc.).
 - **Fail-Safe Enforcement**: If no guard/judge model is configured or credentials are missing, commands cannot run silently; execution is halted with an alert.
-- **Interactive TUI Ask Dialog**: Flagged commands present the native oh-my-pi ask dialog with scrollable code preview (`Proceed`, `Cancel`, or custom feedback via `Other`).
+- **Interactive TUI Ask Dialog**: Flagged commands present the native oh-my-pi ask dialog displaying the command's action summary and risk assessment, defaulting to `Proceed` alongside scrollable code preview and custom feedback via `Other`.
 - **Zero-Latency Critical Regex**: Instant interception for catastrophic destructive wipes (`rm -rf /`, `mkfs`, raw device writes, fork bombs, hard resets).
 - **Developer-Friendly Boundaries**: Safe local operations (builds, tests, linters, repo file edits, diagnostics) are classified as safe without interrupting flow.
 

@@ -1,9 +1,13 @@
-import { CRITICAL_DANGER_REGEX } from "./src/constants";
+import { CRITICAL_DANGER_REGEX, getCriticalDangerAudit } from "./src/constants";
 import { evaluateCommandSafety, resolveGuardModel } from "./src/guard-model";
 import type { BlockResult, ExtensionContext, PiExtensionAPI, ToolCallEvent } from "./src/types";
 import { promptUser } from "./src/ui";
 
-export { CRITICAL_DANGER_REGEX, GUARD_SYSTEM_PROMPT } from "./src/constants";
+export {
+  CRITICAL_DANGER_REGEX,
+  GUARD_SYSTEM_PROMPT,
+  getCriticalDangerAudit,
+} from "./src/constants";
 export {
   evaluateCommandSafety,
   isKeylessModel,
@@ -24,11 +28,7 @@ export default function registerBashGuard(pi: PiExtensionAPI) {
       if (!command) return;
 
       if (CRITICAL_DANGER_REGEX.test(command)) {
-        return promptUser(
-          ctx,
-          command,
-          "Critical destructive or irreversible infrastructure action detected.",
-        );
+        return promptUser(ctx, command, getCriticalDangerAudit(command));
       }
 
       const guard = await resolveGuardModel(ctx);
@@ -38,11 +38,10 @@ export default function registerBashGuard(pi: PiExtensionAPI) {
 
       const verdict = await evaluateCommandSafety(guard.model, guard.apiKey, command);
       if (!verdict.safe) {
-        return promptUser(
-          ctx,
-          command,
-          verdict.reason || "Action modifies state, cloud resources, or data.",
-        );
+        return promptUser(ctx, command, {
+          action: verdict.action,
+          reason: verdict.reason || "Action modifies state, cloud resources, or data.",
+        });
       }
     },
   );

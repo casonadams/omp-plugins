@@ -10,6 +10,17 @@ export interface BlockResult {
   reason: string;
 }
 
+export interface GuardVerdict {
+  safe: boolean;
+  action?: string;
+  reason: string;
+}
+
+export interface SecurityAudit {
+  action?: string;
+  reason: string;
+}
+
 export interface ExtensionUIContext {
   select?(
     title: string,

@@ -1,6 +1,6 @@
 import { completeSimple, type Api, type Model } from "@oh-my-pi/pi-ai";
 import { GUARD_SYSTEM_PROMPT } from "./constants";
-import type { ExtensionContext } from "./types";
+import type { ExtensionContext, GuardVerdict } from "./types";
 
 export type GuardModelResolution =
   { model: Model<Api>; apiKey?: string } | { block: true; reason: string };
@@ -39,7 +39,7 @@ export async function resolveGuardModel(ctx?: ExtensionContext): Promise<GuardMo
   return { model, apiKey: apiKey || (isKeyless ? "none" : undefined) };
 }
 
-export function parseGuardOutput(text: string): { safe: boolean; reason: string } {
+export function parseGuardOutput(text: string): GuardVerdict {
   const clean = text
     .replace(/<(?:think|thought|thinking)>[\s\S]*?<\/(?:think|thought|thinking)>/gi, "")
     .trim();
@@ -47,10 +47,19 @@ export function parseGuardOutput(text: string): { safe: boolean; reason: string 
   const end = clean.lastIndexOf("}");
   if (start !== -1 && end > start) {
     try {
-      const parsed = JSON.parse(clean.slice(start, end + 1)) as { safe?: boolean; reason?: string };
+      const parsed = JSON.parse(clean.slice(start, end + 1)) as {
+        safe?: boolean;
+        action?: string;
+        reason?: string;
+      };
       if (typeof parsed.safe === "boolean") {
+        const action =
+          typeof parsed.action === "string" && parsed.action.trim()
+            ? parsed.action.trim()
+            : undefined;
         return {
           safe: parsed.safe,
+          ...(action ? { action } : {}),
           reason:
             typeof parsed.reason === "string" && parsed.reason.trim()
               ? parsed.reason.trim()
@@ -82,7 +91,7 @@ export async function evaluateCommandSafety(
   model: Model<Api>,
   apiKey: string | undefined,
   command: string,
-): Promise<{ safe: boolean; reason: string }> {
+): Promise<GuardVerdict> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 4000);
 
