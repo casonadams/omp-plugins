@@ -1,3 +1,4 @@
+import { isAllowlistedCommand, loadGuardConfig } from "./src/config";
 import { CRITICAL_DANGER_REGEX, getCriticalDangerAudit } from "./src/constants";
 import { evaluateCommandSafety, resolveGuardModel } from "./src/guard-model";
 import type { BlockResult, ExtensionContext, PiExtensionAPI, ToolCallEvent } from "./src/types";
@@ -45,6 +46,11 @@ export default function registerBashGuard(pi: PiExtensionAPI) {
         return promptUser(ctx, content, getCriticalDangerAudit(content), language);
       }
 
+      const guardConfig = loadGuardConfig(ctx?.cwd);
+      if (isAllowlistedCommand(content, guardConfig)) {
+        return;
+      }
+
       const guard = await resolveGuardModel(ctx);
       if ("block" in guard) {
         return promptUser(ctx, content, guard.reason, language);
@@ -57,6 +63,7 @@ export default function registerBashGuard(pi: PiExtensionAPI) {
         language,
         undefined,
         ctx?.cwd,
+        guardConfig,
       );
       if (!verdict.safe) {
         return promptUser(

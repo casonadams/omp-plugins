@@ -56,12 +56,19 @@ export function loadGuardConfig(cwd?: string): GuardConfig {
   return {};
 }
 
+function collectStringArray(source: unknown): string[] {
+  if (!Array.isArray(source)) return [];
+  return source
+    .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    .map((item) => item.trim());
+}
+
 export function resolveProductionMarkers(config: GuardConfig): string[] {
   const custom = [
-    ...(config.production?.markers ?? []),
-    ...(config.production?.namespaces ?? []),
-    ...(config.production?.projects ?? []),
-    ...(config.production?.clusters ?? []),
+    ...collectStringArray(config.production?.markers),
+    ...collectStringArray(config.production?.namespaces),
+    ...collectStringArray(config.production?.projects),
+    ...collectStringArray(config.production?.clusters),
   ]
     .map((m) => m.replace(/[*^$]/g, "").trim().toLowerCase())
     .filter(Boolean);
@@ -70,11 +77,17 @@ export function resolveProductionMarkers(config: GuardConfig): string[] {
 }
 
 export function isAllowlistedCommand(command: string, config: GuardConfig): boolean {
-  if (!config.allowlist?.length) return false;
+  if (!Array.isArray(config.allowlist) || config.allowlist.length === 0) return false;
   const trimmed = command.trim();
+  if (!trimmed) return false;
+
   for (const pattern of config.allowlist) {
+    if (typeof pattern !== "string") continue;
+    const trimmedPattern = pattern.trim();
+    if (!trimmedPattern) continue;
+
     try {
-      const regex = new RegExp(pattern, "i");
+      const regex = new RegExp(trimmedPattern, "i");
       if (regex.test(trimmed)) return true;
     } catch {
       // Skip invalid regexes

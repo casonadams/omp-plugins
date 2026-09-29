@@ -1,10 +1,16 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { completeSimple, type Api, type Model } from "@oh-my-pi/pi-ai";
+import { YAML } from "bun";
+import { completeSimple, JUDGMENT_CHAT_MAX_TOKENS, type Api, type Model } from "@oh-my-pi/pi-ai";
 import { GUARD_SYSTEM_PROMPT } from "./constants";
 import type { ExtensionContext, GuardVerdict } from "./types";
-import { isAllowlistedCommand, loadGuardConfig, resolveProductionMarkers } from "./config";
+import {
+  type GuardConfig,
+  isAllowlistedCommand,
+  loadGuardConfig,
+  resolveProductionMarkers,
+} from "./config";
 
 export type GuardModelResolution =
   { model: Model<Api>; apiKey?: string } | { block: true; reason: string };
@@ -37,6 +43,15 @@ export function getConfiguredModelRole(role: string): string | undefined {
     try {
       if (fs.existsSync(file)) {
         const content = fs.readFileSync(file, "utf8");
+        try {
+          const parsed = YAML.parse(content) as Record<string, unknown> | null;
+          const modelRoles = parsed?.modelRoles as Record<string, unknown> | undefined;
+          if (typeof modelRoles?.[role] === "string" && modelRoles[role].trim()) {
+            return modelRoles[role].trim();
+          }
+        } catch {
+          // Fallback to regex if YAML parsing fails
+        }
         const match = content.match(new RegExp(`^\\s*${role}:\\s*['"]?([^'#\\s]+)['"]?`, "m"));
         if (match?.[1]) return match[1].trim();
       }
@@ -61,9 +76,9 @@ function resolveModelFromRegistry(
   registry?: ExtensionContext["modelRegistry"],
 ): Model<Api> | undefined {
   if (!registry) return undefined;
-  const [provider, modelId] = cleanSpec.includes("/")
-    ? cleanSpec.split("/")
-    : ["typesafe", cleanSpec];
+  const slashIdx = cleanSpec.indexOf("/");
+  const provider = slashIdx !== -1 ? cleanSpec.slice(0, slashIdx) : "typesafe";
+  const modelId = slashIdx !== -1 ? cleanSpec.slice(slashIdx + 1) : cleanSpec;
 
   const reg = registry as {
     find?(provider: string, id: string): Model<Api> | undefined;
@@ -92,20 +107,25 @@ function buildFallbackDescriptor(cleanSpec: string): Model<Api> | undefined {
   if (!cleanSpec.startsWith("typesafe/") && !cleanSpec.includes("jev")) {
     return undefined;
   }
-  const [provider, modelId] = cleanSpec.split("/");
+  const slashIdx = cleanSpec.indexOf("/");
+  const provider = slashIdx !== -1 ? cleanSpec.slice(0, slashIdx) : "typesafe";
+  const modelId = slashIdx !== -1 ? cleanSpec.slice(slashIdx + 1) : "jev-latest";
+  const isOrDecisions =
+    provider === "openrouter-decisions" || (provider === "openrouter" && modelId.startsWith("~"));
   return {
     id: modelId || "jev-latest",
     name: "TypeSafe jev",
     provider: provider || "typesafe",
-    api: "typesafe",
-    baseUrl: process.env.TYPESAFE_BASE_URL || "https://api.typesafe.ai",
+    api: isOrDecisions ? "openrouter-decisions" : "typesafe",
+    baseUrl: isOrDecisions
+      ? process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/alpha"
+      : process.env.TYPESAFE_BASE_URL || "https://api.typesafe.ai",
     kind: "judge",
   } as unknown as Model<Api>;
 }
 
 function fallbackResolveModel(ctx?: ExtensionContext): Model<Api> | undefined {
   if (!ctx?.modelRegistry) return undefined;
-
   const roleName = resolveConfiguredRoleName();
   if (!roleName) return undefined;
 
@@ -132,6 +152,9 @@ export async function resolveGuardModel(ctx?: ExtensionContext): Promise<GuardMo
   let apiKey = await ctx?.modelRegistry?.getApiKey(model).catch(() => undefined);
   if (!apiKey && (model.api === "typesafe" || model.provider === "typesafe")) {
     apiKey = process.env.TYPESAFE_API_KEY;
+  }
+  if (!apiKey && (model.api === "openrouter-decisions" || model.provider === "openrouter")) {
+    apiKey = process.env.OPENROUTER_API_KEY;
   }
   const isKeyless = isKeylessModel(model);
 
@@ -221,7 +244,8 @@ async function evaluateChatSafety(
       apiKey: apiKey || (isKeylessModel(model) ? "none" : undefined),
       signal,
       temperature: 0.0,
-      maxTokens: 256,
+      maxTokens: JUDGMENT_CHAT_MAX_TOKENS,
+      disableReasoning: true,
     },
   );
 
@@ -299,6 +323,14 @@ export function parseSystemOneOutput(data: unknown): GuardVerdict {
   const record = data as { answers?: Record<string, any> };
   const answers = record.answers || {};
 
+  if (answers.p3_local_impact !== undefined) {
+    const p1 = answers.p1_prod_impact?.noul;
+    const p2 = answers.p2_malicious?.noul;
+    if (typeof p1 !== "number" || Number.isNaN(p1) || typeof p2 !== "number" || Number.isNaN(p2)) {
+      throw new Error("Missing or invalid P1/P2 risk probability in System One response");
+    }
+  }
+
   return (
     evaluateP1(answers) ||
     evaluateP2(answers) ||
@@ -315,9 +347,20 @@ export async function evaluateSystemOneSafety(
   languageOrFetch: string | typeof fetch = "bash",
   fetchImpl: typeof fetch = fetch,
   cwd?: string,
+  guardConfig?: GuardConfig,
 ): Promise<GuardVerdict> {
-  const language = typeof languageOrFetch === "string" ? languageOrFetch : "bash";
-  const fetchFn = typeof languageOrFetch === "function" ? languageOrFetch : fetchImpl;
+  let language = "bash";
+  let fetchFn = fetchImpl;
+  let resolvedCwd = cwd;
+
+  if (typeof languageOrFetch === "function") {
+    fetchFn = languageOrFetch;
+    if (typeof fetchImpl === "string") {
+      resolvedCwd = fetchImpl;
+    }
+  } else if (typeof languageOrFetch === "string") {
+    language = languageOrFetch;
+  }
 
   const baseUrl = (
     model.baseUrl ||
@@ -336,8 +379,8 @@ export async function evaluateSystemOneSafety(
     headers.Authorization = `Bearer ${apiKey}`;
   }
 
-  const guardConfig = loadGuardConfig(cwd);
-  const markers = resolveProductionMarkers(guardConfig);
+  const config = guardConfig || loadGuardConfig(resolvedCwd);
+  const markers = resolveProductionMarkers(config);
 
   const res = await fetchFn(endpoint, {
     method: "POST",
@@ -346,7 +389,7 @@ export async function evaluateSystemOneSafety(
       state: {
         command,
         language,
-        cwd: cwd || process.cwd(),
+        cwd: resolvedCwd || process.cwd(),
         production_markers: markers,
       },
       model: model.id || "jev-latest",
@@ -396,12 +439,13 @@ export async function evaluateCommandSafety(
   languageOrFetch: string | typeof fetch = "bash",
   fetchImpl: typeof fetch = fetch,
   cwd?: string,
+  guardConfig?: GuardConfig,
 ): Promise<GuardVerdict> {
   const language = typeof languageOrFetch === "string" ? languageOrFetch : "bash";
   const fetchFn = typeof languageOrFetch === "function" ? languageOrFetch : fetchImpl;
 
-  const guardConfig = loadGuardConfig(cwd);
-  if (isAllowlistedCommand(command, guardConfig)) {
+  const config = guardConfig || loadGuardConfig(cwd);
+  if (isAllowlistedCommand(command, config)) {
     return {
       safe: true,
       action: "allowlisted",
@@ -422,6 +466,7 @@ export async function evaluateCommandSafety(
         language,
         fetchFn,
         cwd,
+        config,
       );
     }
     return await evaluateChatSafety(model, apiKey, command, controller.signal, language);

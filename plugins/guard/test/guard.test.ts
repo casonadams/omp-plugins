@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import { describe, expect, test } from "bun:test";
@@ -81,6 +84,36 @@ describe("registerBashGuard", () => {
       reason:
         "[Bash Guard] Blocked unsafe command (headless mode): No guard or judge model configured! Set `modelRoles.guard: <provider/model>` (or `modelRoles.judge`) in ~/.omp/agent/config.yml before executing shell commands.",
     });
+  });
+  test("allows execution of allowlisted command even when no guard model is configured", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-allowlist-test-"));
+    try {
+      fs.writeFileSync(path.join(tempDir, ".guard.yml"), "allowlist:\n  - '^git status$'\n");
+
+      let toolCallHandler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+      const mockPi = {
+        on: (_event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+          toolCallHandler = handler;
+        },
+      };
+
+      registerBashGuard(mockPi as unknown as Parameters<typeof registerBashGuard>[0]);
+
+      const result = await toolCallHandler!(
+        { toolName: "bash", input: { command: "git status" } },
+        {
+          hasUI: false,
+          cwd: tempDir,
+          models: {
+            resolve: () => undefined,
+          },
+        },
+      );
+
+      expect(result).toBeUndefined();
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
   test("presents askDialog with question, recommended Proceed, and Proceed preview with scroller", async () => {
     let toolCallHandler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
@@ -496,6 +529,31 @@ describe("resolveGuardModel", () => {
       reason: 'Guard model "openai/gpt-4" requires an API key, but none was found.',
     });
   });
+  test("resolves openrouter decision model and falls back to OPENROUTER_API_KEY", async () => {
+    const originalEnv = process.env.OPENROUTER_API_KEY;
+    process.env.OPENROUTER_API_KEY = "sk-or-test-key";
+    try {
+      const mockModel = {
+        id: "~typesafe/jev-latest",
+        provider: "openrouter",
+        api: "openrouter-decisions",
+      } as const;
+      const res = await resolveGuardModel({
+        models: { resolve: () => mockModel as unknown as Model<Api> },
+        modelRegistry: { getApiKey: async () => undefined },
+      });
+      expect(res).toEqual({
+        model: mockModel as unknown as Model<Api>,
+        apiKey: "sk-or-test-key",
+      });
+    } finally {
+      if (originalEnv !== undefined) {
+        process.env.OPENROUTER_API_KEY = originalEnv;
+      } else {
+        delete process.env.OPENROUTER_API_KEY;
+      }
+    }
+  });
 });
 
 describe("evaluateCommandSafety", () => {
@@ -812,6 +870,37 @@ describe("parseSystemOneOutput P1/P2/P3 risk hierarchy", () => {
     expect(output2.safe).toBe(true);
     expect(output2.action).toBe("cache_cleanup");
   });
+  test("throws when P1 risk probability is missing or invalid in 3-tier response", () => {
+    expect(() =>
+      parseSystemOneOutput({
+        answers: {
+          p2_malicious: { type: "noul", noul: 0.0 },
+          p3_local_impact: { type: "choice", choice: "safe_local" },
+        },
+      }),
+    ).toThrow("Missing or invalid P1/P2 risk probability");
+
+    expect(() =>
+      parseSystemOneOutput({
+        answers: {
+          p1_prod_impact: { type: "noul", noul: Number.NaN },
+          p2_malicious: { type: "noul", noul: 0.0 },
+          p3_local_impact: { type: "choice", choice: "safe_local" },
+        },
+      }),
+    ).toThrow("Missing or invalid P1/P2 risk probability");
+  });
+
+  test("throws when P2 risk probability is missing or invalid in 3-tier response", () => {
+    expect(() =>
+      parseSystemOneOutput({
+        answers: {
+          p1_prod_impact: { type: "noul", noul: 0.0 },
+          p3_local_impact: { type: "choice", choice: "safe_local" },
+        },
+      }),
+    ).toThrow("Missing or invalid P1/P2 risk probability");
+  });
 });
 
 describe("config utilities", () => {
@@ -847,6 +936,27 @@ describe("config utilities", () => {
     expect(isAllowlistedCommand("git status", {})).toBe(false);
     expect(isAllowlistedCommand("git status", { allowlist: [] })).toBe(false);
     expect(isAllowlistedCommand("git status", { allowlist: ["invalid[regex"] })).toBe(false);
+  });
+  test("resolveProductionMarkers handles scalar strings and non-string array entries safely", () => {
+    const markers = resolveProductionMarkers({
+      production: {
+        markers: "prod" as unknown as string[],
+        namespaces: [12345, null, undefined, "custom-ns"] as unknown as string[],
+      },
+    });
+    expect(markers).toContain("prod");
+    expect(markers).toContain("custom-ns");
+  });
+
+  test("isAllowlistedCommand rejects string allowlist safely without space matching", () => {
+    const config = { allowlist: "git status" as unknown as string[] };
+    expect(isAllowlistedCommand("rm -rf /", config)).toBe(false);
+    expect(isAllowlistedCommand("git status", config)).toBe(false);
+  });
+
+  test("isAllowlistedCommand ignores empty string and whitespace-only patterns", () => {
+    expect(isAllowlistedCommand("rm -rf /", { allowlist: ["", "   "] })).toBe(false);
+    expect(isAllowlistedCommand("git status", { allowlist: ["^git status$", ""] })).toBe(true);
   });
 
   test("loadGuardConfig returns empty object when file not found", () => {
