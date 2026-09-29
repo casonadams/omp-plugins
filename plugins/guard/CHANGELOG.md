@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/casonadams/omp-plugins/compare/guard-v0.6.0...guard-v0.7.0) (2026-09-29)
+
+
+### Features
+
+* **guard:** support fallback across guard, judge, and smol roles ([9af4647](https://github.com/casonadams/omp-plugins/commit/9af4647979ebe1909f33313c38770cc73c9bb12c))
+* **guard:** support fallback across guard, judge, and smol roles ([5600a3b](https://github.com/casonadams/omp-plugins/commit/5600a3b1606f22b877630a3d10d6adba4bd0fa8a))
+
 ## [0.6.0](https://github.com/casonadams/omp-plugins/compare/guard-v0.5.1...guard-v0.6.0) (2026-09-29)
 
 
