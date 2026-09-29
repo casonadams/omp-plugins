@@ -1,6 +1,6 @@
 {
   "name": "history",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Automatically syncs successful bash tool commands to your local zsh or bash history",
   "type": "module",
   "main": "index.ts",
