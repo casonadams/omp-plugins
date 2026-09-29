@@ -21,6 +21,12 @@ export interface SecurityAudit {
   reason: string;
 }
 
+export interface GuardModelCandidate {
+  model: Model<Api>;
+  apiKey?: string;
+  role: string;
+}
+
 export interface ExtensionUIContext {
   select?(
     title: string,
