@@ -76,6 +76,20 @@ omp plugin doctor
 
 ## Upgrading
 
+Upgrading requires fetching the latest release from GitHub into your local marketplace cache before applying the upgrade:
+
 ```sh
+# 1. Fetch latest catalog metadata from GitHub
+omp plugin marketplace update casonadams-plugins
+
+# 2. Upgrade the plugin
 omp plugin upgrade guard@casonadams-plugins
+```
+
+_(Or inside an interactive `omp` session: `/marketplace update casonadams-plugins` followed by `/marketplace upgrade guard@casonadams-plugins`)_
+
+If you need to force a clean reinstall:
+
+```sh
+omp plugin install guard@casonadams-plugins --force
 ```

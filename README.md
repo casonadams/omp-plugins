@@ -56,26 +56,36 @@ omp plugin install guard@casonadams-plugins --force
 
 ## Updating & Upgrading
 
-Fetch latest catalog metadata from GitHub:
+Upgrading plugins is a **two-step process**. `omp` caches marketplace git repositories locally and only refreshes them every 24 hours unless told to update.
+
+### Step 1: Update the marketplace catalog
+
+Fetch the latest releases and tags from GitHub into your local marketplace cache:
 
 ```sh
 omp plugin marketplace update casonadams-plugins
 ```
 
-_(Or inside an interactive session: `/marketplace update casonadams-plugins`)_
+_(Or inside an interactive `omp` session: `/marketplace update casonadams-plugins`)_
 
-Upgrade installed plugins to their latest versions:
+### Step 2: Upgrade the plugin
+
+Upgrade the plugin to the newly fetched version:
 
 ```sh
-# Upgrade all marketplace plugins
-omp plugin upgrade
-
-# Or upgrade specifically
 omp plugin upgrade guard@casonadams-plugins
 ```
 
-_(Or inside an interactive session:
-`/marketplace upgrade guard@casonadams-plugins`)_
+_(Or inside an interactive `omp` session: `/marketplace upgrade guard@casonadams-plugins`)_
+
+> **Why did `omp plugin upgrade` say "All marketplace plugins are up to date"?**
+>
+> 1. **Cache staleness**: `omp plugin upgrade` does not pull from GitHub on every execution. You **must** run `omp plugin marketplace update casonadams-plugins` (Step 1) before upgrading, otherwise `omp` only sees the locally cached git commit.
+> 2. **Target requirement**: Running bare `omp plugin upgrade` (without arguments) checks the top-level catalog manifest and will report up to date if package-level versions are not defined at the catalog root. Always specify `guard@casonadams-plugins` to upgrade directly from the plugin package.
+> 3. **Force reinstall**: If you ever need to force a clean upgrade or switch tracking:
+>    ```sh
+>    omp plugin install guard@casonadams-plugins --force
+>    ```
 
 ## Health & Verification
 
