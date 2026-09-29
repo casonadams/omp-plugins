@@ -1,0 +1,11 @@
+export const DEFAULT_ZSH_HISTORY_FILE = "~/.zsh_history";
+export const DEFAULT_BASH_HISTORY_FILE = "~/.bash_history";
+
+export const ENV_OMP_HISTORY_FILE = "OMP_HISTORY_FILE";
+export const ENV_OMP_HISTORY_TARGET = "OMP_HISTORY_TARGET";
+export const ENV_OMP_SHELL_HISTORY_FILE = "OMP_SHELL_HISTORY_FILE";
+export const ENV_OMP_SHELL_HISTORY_TARGET = "OMP_SHELL_HISTORY_TARGET";
+export const ENV_HISTFILE = "HISTFILE";
+export const ENV_SHELL = "SHELL";
+
+export const FILE_MODE_RESTRICTIVE = 0o600;

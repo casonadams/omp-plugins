@@ -5,6 +5,11 @@
       "release-type": "node",
       "package-name": "guard",
       "component": "guard"
+    },
+    "plugins/history": {
+      "release-type": "node",
+      "package-name": "history",
+      "component": "history"
     }
   }
 }

@@ -201,8 +201,9 @@
             </p>
           </div>
           <div class="filter-group">
-            <button class="filter-btn active" data-category="all">All (1)</button>
+            <button class="filter-btn active" data-category="all">All (2)</button>
             <button class="filter-btn" data-category="security">Security (1)</button>
+            <button class="filter-btn" data-category="utilities">Utilities (1)</button>
           </div>
         </div>
 
@@ -335,6 +336,143 @@
               </a>
               <a
                 href="https://github.com/casonadams/omp-plugins/blob/main/plugins/guard/README.md"
+                target="_blank"
+                rel="noopener"
+                class="btn-link"
+              >
+                <span>Documentation ↗</span>
+              </a>
+            </div>
+          </article>
+
+          <!-- Plugin: history -->
+          <article class="plugin-card" data-category="utilities">
+            <div class="card-top">
+              <div class="plugin-identity">
+                <div class="plugin-icon-wrap" aria-hidden="true">
+                  <svg
+                    width="22"
+                    height="22"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <polyline points="4 17 10 11 4 5"></polyline>
+                    <line x1="12" y1="19" x2="20" y2="19"></line>
+                  </svg>
+                </div>
+                <div>
+                  <h3 class="plugin-name">history</h3>
+                </div>
+              </div>
+              <span class="badge-category">Utilities</span>
+            </div>
+
+            <p class="plugin-desc">
+              Automatically syncs successful bash tool commands to your local zsh or bash history.
+              Enables native history recall and search via Ctrl+R for all agent-executed commands.
+            </p>
+
+            <div class="card-install-box">
+              <code class="card-install-cmd">omp plugin install history@casonadams-plugins</code>
+              <button
+                class="btn-copy"
+                data-copy="omp plugin install history@casonadams-plugins"
+                aria-label="Copy install command for history"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Copy</span>
+              </button>
+            </div>
+
+            <ul class="card-features">
+              <li class="card-feature-item">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span>Auto-detects Zsh and Bash history targets</span>
+              </li>
+              <li class="card-feature-item">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span>Native Zsh extended history with multiline escaping</span>
+              </li>
+              <li class="card-feature-item">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span>Shell hygiene: skips leading spaces and duplicates</span>
+              </li>
+            </ul>
+
+            <div class="card-actions">
+              <a
+                href="https://github.com/casonadams/omp-plugins/tree/main/plugins/history"
+                target="_blank"
+                rel="noopener"
+                class="btn-link"
+              >
+                <span>View Plugin Source</span>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                  <polyline points="15 3 21 3 21 9"></polyline>
+                  <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+              </a>
+              <a
+                href="https://github.com/casonadams/omp-plugins/blob/main/plugins/history/README.md"
                 target="_blank"
                 rel="noopener"
                 class="btn-link"
