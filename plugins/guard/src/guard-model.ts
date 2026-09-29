@@ -16,6 +16,10 @@ export function isKeylessModel(model: Model<Api>): boolean {
   );
 }
 
+export function isDecisionModel(model: Model<Api>): boolean {
+  return model.api === "typesafe" || model.api === "openrouter-decisions" || model.kind === "judge";
+}
+
 export async function resolveGuardModel(ctx?: ExtensionContext): Promise<GuardModelResolution> {
   const model = ctx?.models?.resolve("@guard") ?? ctx?.models?.resolve("@judge");
   if (!model) {
@@ -87,46 +91,152 @@ export function parseGuardOutput(text: string): GuardVerdict {
   };
 }
 
+async function evaluateChatSafety(
+  model: Model<Api>,
+  apiKey: string | undefined,
+  command: string,
+  signal: AbortSignal,
+): Promise<GuardVerdict> {
+  const response = await completeSimple(
+    model,
+    {
+      systemPrompt: [GUARD_SYSTEM_PROMPT],
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `<command_to_evaluate>\n${command}\n</command_to_evaluate>`,
+            },
+          ],
+          timestamp: Date.now(),
+        },
+      ],
+    },
+    {
+      apiKey: apiKey || (isKeylessModel(model) ? "none" : undefined),
+      signal,
+      temperature: 0.0,
+      maxTokens: 256,
+    },
+  );
+
+  const textBlock = response.content.find(
+    (b): b is { type: "text"; text: string } => b.type === "text" && typeof b.text === "string",
+  );
+  if (!textBlock?.text.trim()) throw new Error("No text response received from guard model");
+
+  return parseGuardOutput(textBlock.text);
+}
+
+export function parseSystemOneOutput(data: unknown): GuardVerdict {
+  if (!data || typeof data !== "object") {
+    throw new Error("Invalid response format from System One model");
+  }
+
+  const record = data as {
+    answers?: {
+      safety?: { type?: string; noul?: number };
+      action?: { type?: string; choice?: string };
+    };
+  };
+
+  const safety = record.answers?.safety?.noul;
+  const action = record.answers?.action?.choice || "ambiguous";
+
+  if (typeof safety !== "number" || Number.isNaN(safety)) {
+    throw new Error("Missing safety probability in System One response");
+  }
+
+  const isSafe = safety >= 0.85 && action === "safe_local";
+  const pct = Math.round(safety * 100);
+
+  return {
+    safe: isSafe,
+    action,
+    reason: isSafe
+      ? "Command verified safe by System One."
+      : `System One flagged as [${action}] (safety: ${pct}%).`,
+  };
+}
+
+export async function evaluateSystemOneSafety(
+  model: Model<Api>,
+  apiKey: string | undefined,
+  command: string,
+  signal: AbortSignal,
+  fetchImpl: typeof fetch = fetch,
+): Promise<GuardVerdict> {
+  const baseUrl = (
+    model.baseUrl ||
+    (model.api === "openrouter-decisions"
+      ? "https://openrouter.ai/api/alpha"
+      : "https://api.typesafe.ai")
+  ).replace(/\/+$/, "");
+
+  const endpoint =
+    model.api === "openrouter-decisions" ? `${baseUrl}/decisions` : `${baseUrl}/v1/systemone`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  const res = await fetchImpl(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      state: command,
+      model: model.id || "jev-latest",
+      questions: {
+        safety: {
+          type: "noul",
+          instructions:
+            "Is this shell command safe to execute on a developer workstation without data loss, credential theft, system file deletion, or irreversible state corruption?",
+        },
+        action: {
+          type: "choice",
+          instructions: "Classify the scope and hazard level of this command.",
+          criteria: {
+            safe_local: "Local build, test, lint, diagnostic, or git inspection.",
+            cloud_or_remote:
+              "Cloud/cluster mutations (k8s, AWS, GCP, terraform) or remote git push/publication.",
+            destructive:
+              "Recursive file deletion, disk operations, permission rewrites, or system configuration edits.",
+            ambiguous: "Obfuscated, complex chained commands, or unclear blast radius.",
+          },
+        },
+      },
+    }),
+    signal,
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "");
+    throw new Error(`System One API ${res.status}: ${errorBody}`);
+  }
+
+  const data = await res.json();
+  return parseSystemOneOutput(data);
+}
+
 export async function evaluateCommandSafety(
   model: Model<Api>,
   apiKey: string | undefined,
   command: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<GuardVerdict> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 4000);
 
   try {
-    const response = await completeSimple(
-      model,
-      {
-        systemPrompt: [GUARD_SYSTEM_PROMPT],
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `<command_to_evaluate>\n${command}\n</command_to_evaluate>`,
-              },
-            ],
-            timestamp: Date.now(),
-          },
-        ],
-      },
-      {
-        apiKey: apiKey || (isKeylessModel(model) ? "none" : undefined),
-        signal: controller.signal,
-        temperature: 0.0,
-        maxTokens: 256,
-      },
-    );
-
-    const textBlock = response.content.find(
-      (b): b is { type: "text"; text: string } => b.type === "text" && typeof b.text === "string",
-    );
-    if (!textBlock?.text.trim()) throw new Error("No text response received from guard model");
-
-    return parseGuardOutput(textBlock.text);
+    if (isDecisionModel(model)) {
+      return await evaluateSystemOneSafety(model, apiKey, command, controller.signal, fetchImpl);
+    }
+    return await evaluateChatSafety(model, apiKey, command, controller.signal);
   } catch (err) {
     return {
       safe: false,

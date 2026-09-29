@@ -10,8 +10,11 @@ export {
 } from "./src/constants";
 export {
   evaluateCommandSafety,
+  evaluateSystemOneSafety,
+  isDecisionModel,
   isKeylessModel,
   parseGuardOutput,
+  parseSystemOneOutput,
   resolveGuardModel,
 } from "./src/guard-model";
 export type * from "./src/types";

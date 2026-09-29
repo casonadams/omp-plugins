@@ -14,7 +14,7 @@ omp plugin install guard@casonadams-plugins
 
 ## Features
 
-- **Decoupled Model Configuration**: Uses your configured `guard` model role in `config.yml` (falls back to `judge`). Works with any provider supported by oh-my-pi (Ollama, Anthropic, OpenAI, Gemini, Bedrock, etc.).
+- **Decoupled Model Configuration**: Uses your configured `guard` model role in `config.yml` (falls back to `judge`). Works with any provider supported by oh-my-pi (Ollama, Anthropic, OpenAI, Gemini, Bedrock, etc., as well as native TypeSafe / System One decision models).
 - **Fail-Safe Enforcement**: If no guard/judge model is configured or credentials are missing, commands cannot run silently; execution is halted with an alert.
 - **Interactive TUI Ask Dialog**: Flagged commands present the native oh-my-pi ask dialog displaying the command's action summary and risk assessment, defaulting to `Proceed` alongside scrollable code preview and custom feedback via `Other`.
 - **Zero-Latency Critical Regex**: Instant interception for catastrophic destructive wipes (`rm -rf /`, `mkfs`, raw device writes, fork bombs, hard resets).
@@ -29,7 +29,7 @@ tools:
   approvalMode: yolo
 
 modelRoles:
-  guard: ollama/qwen2.5-coder:7b # Recommended local model (falls back to judge)
+  guard: ollama/qwen2.5-coder:7b # Recommended local model (falls back to judge, e.g. typesafe/jev-latest)
 
 marketplace:
   autoUpdate: notify # Alert when plugin updates are available (off|notify|auto)

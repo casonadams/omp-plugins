@@ -5,8 +5,11 @@ import registerBashGuard, {
   CRITICAL_DANGER_REGEX,
   GUARD_SYSTEM_PROMPT,
   evaluateCommandSafety,
+  evaluateSystemOneSafety,
   getCriticalDangerAudit,
+  isDecisionModel,
   parseGuardOutput,
+  parseSystemOneOutput,
   promptUser,
   resolveGuardModel,
 } from "../index";
@@ -650,5 +653,331 @@ describe("GUARD_SYSTEM_PROMPT", () => {
     expect(GUARD_SYSTEM_PROMPT).toContain(
       '{"safe": boolean, "action": "concise description of what the command does", "reason": "concise explanation of safety or risk"}',
     );
+  });
+});
+
+describe("isDecisionModel", () => {
+  test("identifies typesafe api models", () => {
+    const model = { api: "typesafe", provider: "typesafe", id: "jev-latest" } as Model<Api>;
+    expect(isDecisionModel(model)).toBe(true);
+  });
+
+  test("identifies openrouter-decisions api models", () => {
+    const model = {
+      api: "openrouter-decisions",
+      provider: "openrouter",
+      id: "~typesafe/jev-latest",
+    } as Model<Api>;
+    expect(isDecisionModel(model)).toBe(true);
+  });
+
+  test("identifies judge kind models", () => {
+    const model = {
+      api: "typesafe",
+      provider: "typesafe",
+      id: "jev-fast",
+      kind: "judge",
+    } as unknown as Model<Api>;
+    expect(isDecisionModel(model)).toBe(true);
+  });
+
+  test("returns false for standard chat models", () => {
+    const model = {
+      api: "openai-responses",
+      provider: "openai",
+      id: "gpt-4o",
+      kind: "chat",
+    } as unknown as Model<Api>;
+    expect(isDecisionModel(model)).toBe(false);
+  });
+});
+
+describe("parseSystemOneOutput", () => {
+  test("returns safe verdict for high safety score and safe_local action", () => {
+    const output = parseSystemOneOutput({
+      answers: {
+        safety: { type: "noul", noul: 0.95 },
+        action: { type: "choice", choice: "safe_local" },
+      },
+    });
+    expect(output.safe).toBe(true);
+    expect(output.action).toBe("safe_local");
+    expect(output.reason).toBe("Command verified safe by System One.");
+  });
+
+  test("returns unsafe verdict when safety score is below 0.85", () => {
+    const output = parseSystemOneOutput({
+      answers: {
+        safety: { type: "noul", noul: 0.8 },
+        action: { type: "choice", choice: "safe_local" },
+      },
+    });
+    expect(output.safe).toBe(false);
+    expect(output.action).toBe("safe_local");
+    expect(output.reason).toContain("System One flagged as [safe_local] (safety: 80%).");
+  });
+
+  test("returns unsafe verdict when action is not safe_local", () => {
+    const output = parseSystemOneOutput({
+      answers: {
+        safety: { type: "noul", noul: 0.95 },
+        action: { type: "choice", choice: "cloud_or_remote" },
+      },
+    });
+    expect(output.safe).toBe(false);
+    expect(output.action).toBe("cloud_or_remote");
+    expect(output.reason).toContain("System One flagged as [cloud_or_remote]");
+  });
+
+  test("throws when input data is not an object", () => {
+    expect(() => parseSystemOneOutput(null)).toThrow("Invalid response format");
+    expect(() => parseSystemOneOutput("string")).toThrow("Invalid response format");
+  });
+
+  test("throws when safety score is missing or invalid", () => {
+    expect(() => parseSystemOneOutput({ answers: {} })).toThrow("Missing safety probability");
+    expect(() =>
+      parseSystemOneOutput({ answers: { safety: { type: "noul", noul: Number.NaN } } }),
+    ).toThrow("Missing safety probability");
+  });
+});
+
+describe("evaluateSystemOneSafety", () => {
+  test("queries typesafe default endpoint with apiKey and parses output", async () => {
+    let requestUrl: string | undefined;
+    let requestInit: RequestInit | undefined;
+
+    const mockFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      requestUrl = String(input);
+      requestInit = init;
+      return new Response(
+        JSON.stringify({
+          answers: {
+            safety: { type: "noul", noul: 0.99 },
+            action: { type: "choice", choice: "safe_local" },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const model = { api: "typesafe", provider: "typesafe", id: "jev-latest" } as Model<Api>;
+    const controller = new AbortController();
+    const verdict = await evaluateSystemOneSafety(
+      model,
+      "ts-test-key",
+      "cargo test",
+      controller.signal,
+      mockFetch as unknown as typeof fetch,
+    );
+
+    expect(requestUrl).toBe("https://api.typesafe.ai/v1/systemone");
+    expect(requestInit?.method).toBe("POST");
+    const headers = requestInit?.headers as Record<string, string>;
+    expect(headers["Authorization"]).toBe("Bearer ts-test-key");
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(verdict.safe).toBe(true);
+    expect(verdict.reason).toBe("Command verified safe by System One.");
+  });
+
+  test("queries openrouter decisions route for openrouter-decisions api", async () => {
+    let requestUrl: string | undefined;
+    const mockFetch = async (input: RequestInfo | URL) => {
+      requestUrl = String(input);
+      return new Response(
+        JSON.stringify({
+          answers: {
+            safety: { type: "noul", noul: 0.99 },
+            action: { type: "choice", choice: "safe_local" },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const model = {
+      api: "openrouter-decisions",
+      provider: "openrouter",
+      id: "~typesafe/jev-latest",
+    } as Model<Api>;
+    const controller = new AbortController();
+    await evaluateSystemOneSafety(
+      model,
+      "or-key",
+      "cargo test",
+      controller.signal,
+      mockFetch as unknown as typeof fetch,
+    );
+
+    expect(requestUrl).toBe("https://openrouter.ai/api/alpha/decisions");
+  });
+
+  test("throws when System One API returns non-200 status", async () => {
+    const mockFetch = async () => new Response("Unauthorized", { status: 401 });
+    const model = { api: "typesafe", provider: "typesafe", id: "jev-latest" } as Model<Api>;
+    const controller = new AbortController();
+
+    expect(
+      evaluateSystemOneSafety(
+        model,
+        undefined,
+        "cargo test",
+        controller.signal,
+        mockFetch as unknown as typeof fetch,
+      ),
+    ).rejects.toThrow("System One API 401: Unauthorized");
+  });
+});
+
+describe("evaluateCommandSafety with decision models", () => {
+  test("evaluates command safety via System One route and returns verdict", async () => {
+    const mockFetch = async () =>
+      new Response(
+        JSON.stringify({
+          answers: {
+            safety: { type: "noul", noul: 0.95 },
+            action: { type: "choice", choice: "safe_local" },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+
+    const model = { api: "typesafe", provider: "typesafe", id: "jev-latest" } as Model<Api>;
+    const verdict = await evaluateCommandSafety(
+      model,
+      "key",
+      "git status",
+      mockFetch as unknown as typeof fetch,
+    );
+    expect(verdict.safe).toBe(true);
+  });
+
+  test("handles System One failure safely", async () => {
+    const mockFetch = async () => new Response("Internal Server Error", { status: 500 });
+    const model = { api: "typesafe", provider: "typesafe", id: "jev-latest" } as Model<Api>;
+    const verdict = await evaluateCommandSafety(
+      model,
+      "key",
+      "git status",
+      mockFetch as unknown as typeof fetch,
+    );
+    expect(verdict.safe).toBe(false);
+    expect(verdict.reason).toContain("Guard model check failed");
+  });
+});
+
+describe("registerBashGuard integration with decision models", () => {
+  test("allows execution when decision model confirms command safe", async () => {
+    let toolCallHandler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+    const mockPi = {
+      on: (_event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+        toolCallHandler = handler;
+      },
+    };
+
+    registerBashGuard(mockPi as unknown as Parameters<typeof registerBashGuard>[0]);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          answers: {
+            safety: { type: "noul", noul: 0.95 },
+            action: { type: "choice", choice: "safe_local" },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )) as unknown as typeof fetch;
+
+    try {
+      const decisionModel = {
+        api: "typesafe",
+        provider: "typesafe",
+        id: "jev-latest",
+      } as Model<Api>;
+
+      const result = await toolCallHandler!(
+        { toolName: "bash", input: { command: "cargo check" } },
+        {
+          hasUI: true,
+          models: {
+            resolve: () => decisionModel,
+          },
+          modelRegistry: {
+            getApiKey: async () => "ts-key",
+          },
+        },
+      );
+
+      expect(result).toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("prompts user when decision model flags command as unsafe", async () => {
+    let toolCallHandler: ((event: unknown, ctx: unknown) => Promise<unknown>) | undefined;
+    const mockPi = {
+      on: (_event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => {
+        toolCallHandler = handler;
+      },
+    };
+
+    registerBashGuard(mockPi as unknown as Parameters<typeof registerBashGuard>[0]);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          answers: {
+            safety: { type: "noul", noul: 0.4 },
+            action: { type: "choice", choice: "cloud_or_remote" },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )) as unknown as typeof fetch;
+
+    try {
+      const decisionModel = {
+        api: "typesafe",
+        provider: "typesafe",
+        id: "jev-latest",
+      } as Model<Api>;
+
+      let promptedReason: string | undefined;
+      const mockAskDialog = async (questions: unknown) => {
+        const qs = questions as Array<{ question: string }>;
+        promptedReason = qs[0]?.question;
+        return {
+          kind: "submit",
+          results: [{ selectedOptions: ["Cancel"] }],
+        };
+      };
+
+      const result = await toolCallHandler!(
+        { toolName: "bash", input: { command: "git push origin main" } },
+        {
+          hasUI: true,
+          ui: {
+            askDialog: mockAskDialog,
+          },
+          models: {
+            resolve: () => decisionModel,
+          },
+          modelRegistry: {
+            getApiKey: async () => "ts-key",
+          },
+        },
+      );
+
+      expect(promptedReason).toContain("System One flagged as [cloud_or_remote]");
+      expect(result).toEqual({
+        block: true,
+        reason:
+          "User denied execution: System One flagged as [cloud_or_remote] (safety: 40%). (Action: cloud_or_remote)",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
