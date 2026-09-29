@@ -1,3 +1,4 @@
+import { isAllowlistedCommand, loadGuardConfig } from "./src/config";
 import { CRITICAL_DANGER_REGEX, getCriticalDangerAudit } from "./src/constants";
 import { evaluateCommandSafety, resolveGuardModel } from "./src/guard-model";
 import type { BlockResult, ExtensionContext, PiExtensionAPI, ToolCallEvent } from "./src/types";
@@ -10,10 +11,15 @@ export {
 } from "./src/constants";
 export {
   evaluateCommandSafety,
+  evaluateSystemOneSafety,
+  getConfiguredModelRole,
+  isDecisionModel,
   isKeylessModel,
   parseGuardOutput,
+  parseSystemOneOutput,
   resolveGuardModel,
 } from "./src/guard-model";
+export { isAllowlistedCommand, loadGuardConfig, resolveProductionMarkers } from "./src/config";
 export type * from "./src/types";
 export { promptUser } from "./src/ui";
 
@@ -21,27 +27,58 @@ export default function registerBashGuard(pi: PiExtensionAPI) {
   pi.on(
     "tool_call",
     async (event: ToolCallEvent, ctx?: ExtensionContext): Promise<BlockResult | void> => {
-      if (event.toolName !== "bash") return;
+      let content: string | undefined;
+      let language = "bash";
 
-      const command =
-        typeof event.input?.command === "string" ? event.input.command.trim() : undefined;
-      if (!command) return;
+      if (event.toolName === "bash") {
+        content = typeof event.input?.command === "string" ? event.input.command.trim() : undefined;
+        language = "bash";
+      } else if (event.toolName === "eval") {
+        content = typeof event.input?.code === "string" ? event.input.code.trim() : undefined;
+        language = typeof event.input?.language === "string" ? event.input.language : "js";
+      } else {
+        return;
+      }
 
-      if (CRITICAL_DANGER_REGEX.test(command)) {
-        return promptUser(ctx, command, getCriticalDangerAudit(command));
+      if (!content) return;
+
+      if (CRITICAL_DANGER_REGEX.test(content)) {
+        return promptUser(ctx, content, getCriticalDangerAudit(content), language);
+      }
+
+      const guardConfig = loadGuardConfig(ctx?.cwd);
+      if (isAllowlistedCommand(content, guardConfig)) {
+        return;
       }
 
       const guard = await resolveGuardModel(ctx);
       if ("block" in guard) {
-        return promptUser(ctx, command, guard.reason);
+        return promptUser(ctx, content, guard.reason, language);
       }
 
-      const verdict = await evaluateCommandSafety(guard.model, guard.apiKey, command);
+      const verdict = await evaluateCommandSafety(
+        guard.model,
+        guard.apiKey,
+        content,
+        language,
+        undefined,
+        ctx?.cwd,
+        guardConfig,
+      );
       if (!verdict.safe) {
-        return promptUser(ctx, command, {
-          action: verdict.action,
-          reason: verdict.reason || "Action modifies state, cloud resources, or data.",
-        });
+        return promptUser(
+          ctx,
+          content,
+          {
+            action: verdict.action,
+            reason:
+              verdict.reason ||
+              (language === "bash"
+                ? "Action modifies state, cloud resources, or data."
+                : "Script executes processes, modifies state, or mutates data."),
+          },
+          language,
+        );
       }
     },
   );

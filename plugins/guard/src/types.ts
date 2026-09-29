@@ -56,6 +56,7 @@ export interface ExtensionUIContext {
 export interface ExtensionContext {
   hasUI?: boolean;
   ui?: ExtensionUIContext;
+  cwd?: string;
   models?: {
     resolve(spec: string): Model<Api> | undefined;
   };
