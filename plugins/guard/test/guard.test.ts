@@ -127,7 +127,6 @@ describe("registerBashGuard", () => {
     expect(questions[0]?.question).toContain(
       "Risk: Critical destructive filesystem wipe detected.",
     );
-    expect(questions[0]?.question).toContain("Allow execution?");
     expect(questions[0]?.recommended).toBe(0);
     expect(questions[0]?.options[0]?.label).toBe("Proceed");
     expect(questions[0]?.options[0]?.preview).toBe("```bash\nrm -rf /\n```");

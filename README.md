@@ -3,6 +3,8 @@
 Official marketplace catalog for [oh-my-pi](https://github.com/can1357/oh-my-pi)
 (`omp`) plugins and extensions.
 
+🌐 **Showcase & Catalog Website:** [https://casonadams.github.io/omp-plugins/](https://casonadams.github.io/omp-plugins/)
+
 ## Adding the Marketplace
 
 In your terminal:
@@ -25,9 +27,10 @@ omp plugin marketplace list
 
 ## Available Plugins
 
-| Plugin                     | Category | Description                                                                                   |
-| -------------------------- | -------- | --------------------------------------------------------------------------------------------- |
-| [`guard`](./plugins/guard) | Security | Security gatekeeper extension for shell execution using the configured guard/judge model role |
+| Plugin                         | Category  | Description                                                                                   |
+| ------------------------------ | --------- | --------------------------------------------------------------------------------------------- |
+| [`guard`](./plugins/guard)     | Security  | Security gatekeeper extension for shell execution using the configured guard/judge model role |
+| [`history`](./plugins/history) | Utilities | Automatically syncs successful bash tool commands to your local zsh or bash history           |
 
 ## Installing Plugins
 

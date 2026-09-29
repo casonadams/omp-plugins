@@ -1,10 +1,16 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "separate-pull-requests": true,
   "packages": {
     "plugins/guard": {
       "release-type": "node",
       "package-name": "guard",
       "component": "guard"
+    },
+    "plugins/history": {
+      "release-type": "node",
+      "package-name": "history",
+      "component": "history"
     }
   }
 }

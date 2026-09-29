@@ -11,6 +11,13 @@
       "category": "security",
       "source": "./plugins/guard",
       "homepage": "https://github.com/casonadams/omp-plugins"
+    },
+    {
+      "name": "history",
+      "description": "Automatically syncs successful bash tool commands to your local zsh or bash history",
+      "category": "utilities",
+      "source": "./plugins/history",
+      "homepage": "https://github.com/casonadams/omp-plugins"
     }
   ]
 }

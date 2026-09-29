@@ -27,7 +27,7 @@ async function promptViaAskDialog(
     {
       id: "guard_approval",
       header,
-      question: `Security Audit:\n${audit.auditBlock.trim()}\n \nAllow execution?`,
+      question: `Security Audit:\n${audit.auditBlock.trim()}`,
       recommended: 0,
       options: [
         {
@@ -69,7 +69,7 @@ async function promptViaConfirm(
 ): Promise<BlockResult | void> {
   const approved = await ui.confirm!(
     header,
-    `Security Audit:\n${audit.auditBlock}\n\n${language === "bash" ? "Command:\n$" : "Script:"} ${command}\n\nAllow execution?`,
+    `Security Audit:\n${audit.auditBlock}\n\n${language === "bash" ? "Command:\n$" : "Script:"} ${command}`,
   );
   if (approved) return;
   return { block: true, reason: `User denied execution: ${audit.auditSummary}` };

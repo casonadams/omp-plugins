@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/casonadams/omp-plugins/compare/guard-v0.5.0...guard-v0.5.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **test:** clean up Ask ([602e7fb](https://github.com/casonadams/omp-plugins/commit/602e7fbd7ab43df4bb0e633e07412cfc406ce740))
+
 ## [0.5.0](https://github.com/casonadams/omp-plugins/compare/guard-v0.4.1...guard-v0.5.0) (2026-09-29)
 
 

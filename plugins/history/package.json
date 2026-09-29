@@ -1,7 +1,7 @@
 {
-  "name": "guard",
-  "version": "0.5.1",
-  "description": "Security gatekeeper extension for shell execution using configured guard/judge model roles in oh-my-pi",
+  "name": "history",
+  "version": "1.0.0",
+  "description": "Automatically syncs successful bash tool commands to your local zsh or bash history",
   "type": "module",
   "main": "index.ts",
   "scripts": {
@@ -22,12 +22,12 @@
   "keywords": [
     "omp-plugin",
     "oh-my-pi",
-    "security",
-    "guard"
+    "shell",
+    "history",
+    "zsh",
+    "bash",
+    "utilities"
   ],
-  "dependencies": {
-    "@oh-my-pi/pi-ai": "^18.3.2"
-  },
   "devDependencies": {
     "@types/bun": "^1.4.2",
     "oxlint": "^1.85.0",
