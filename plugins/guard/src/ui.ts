@@ -25,7 +25,7 @@ export async function promptUser(
       {
         id: "bash_guard_approval",
         header: "Bash Guard",
-        question: `Security Audit:\n${auditBlock.trim()}\n \nAllow execution?`,
+        question: `Security Audit:\n${auditBlock.trim()}`,
         recommended: 0,
         options: [
           {
@@ -63,7 +63,7 @@ export async function promptUser(
   if (typeof ctx.ui?.confirm === "function") {
     const approved = await ctx.ui.confirm(
       "Bash Guard",
-      `Security Audit:\n${auditBlock}\n\nCommand:\n$ ${command}\n\nAllow execution?`,
+      `Security Audit:\n${auditBlock}\n\nCommand:\n$ ${command}`,
     );
     if (approved) return;
     return { block: true, reason: `User denied execution: ${auditSummary}` };
