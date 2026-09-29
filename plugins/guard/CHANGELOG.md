@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/casonadams/omp-plugins/compare/guard-v0.5.1...guard-v0.6.0) (2026-09-29)
+
+
+### Features
+
+* **guard:** support TypeSafe Jev decision models, eval protection, and .guard.yml ([#8](https://github.com/casonadams/omp-plugins/issues/8)) ([d62c25f](https://github.com/casonadams/omp-plugins/commit/d62c25f736378086db9a68c15cf865b0b0563b24))
+
 ## [0.5.1](https://github.com/casonadams/omp-plugins/compare/guard-v0.5.0...guard-v0.5.1) (2026-09-29)
 
 
