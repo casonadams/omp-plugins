@@ -300,7 +300,9 @@ async function evaluateChatSafety(
   );
   if (!textBlock?.text.trim()) throw new Error("No text response received from guard model");
 
-  return parseGuardOutput(textBlock.text);
+  const verdict = parseGuardOutput(textBlock.text);
+  verdict.model = model.id;
+  return verdict;
 }
 
 function evaluateP1(answers: Record<string, any>): GuardVerdict | undefined {
@@ -377,12 +379,14 @@ export function parseSystemOneOutput(data: unknown): GuardVerdict {
     }
   }
 
-  return (
+  const verdict = (
     evaluateP1(answers) ||
     evaluateP2(answers) ||
     evaluateP3(answers) ||
     evaluateLegacyAnswer(answers)
   );
+  verdict.rawAnswers = answers;
+  return verdict;
 }
 
 export async function evaluateSystemOneSafety(
@@ -475,7 +479,9 @@ export async function evaluateSystemOneSafety(
   }
 
   const data = await res.json();
-  return parseSystemOneOutput(data);
+  const verdict = parseSystemOneOutput(data);
+  verdict.model = model.id || "jev-latest";
+  return verdict;
 }
 
 export async function evaluateCommandSafety(
@@ -546,6 +552,9 @@ export async function evaluateCommandSafetyWithFallback(
       cwd,
       guardConfig,
     );
+    if (!verdict.model) {
+      verdict.model = candidate.model.id || candidate.role;
+    }
     if (!verdict.reason.startsWith("Guard model check failed")) {
       return verdict;
     }
