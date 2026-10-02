@@ -709,7 +709,7 @@ describe("evaluateCommandSafetyWithFallback", () => {
       "git status",
     );
 
-    expect(res).toEqual({ safe: true, reason: "Primary verified safe" });
+    expect(res).toEqual({ safe: true, reason: "Primary verified safe", model: "mock-model" });
   });
 
   test("returns intentional unsafe verdict from primary candidate without triggering fallback", async () => {
@@ -745,6 +745,7 @@ describe("evaluateCommandSafetyWithFallback", () => {
       safe: false,
       action: "Deletes production pod",
       reason: "Mutates production environment",
+      model: "mock-model",
     });
   });
 
@@ -768,7 +769,7 @@ describe("evaluateCommandSafetyWithFallback", () => {
       "npm test",
     );
 
-    expect(res).toEqual({ safe: true, reason: "Fallback succeeded" });
+    expect(res).toEqual({ safe: true, reason: "Fallback succeeded", model: "mock-model" });
   });
 
   test("returns last error when all candidates fail", async () => {
@@ -804,7 +805,7 @@ describe("evaluateCommandSafety", () => {
       ],
     });
     const res = await evaluateCommandSafety(mock as unknown as Model<Api>, undefined, "npm test");
-    expect(res).toEqual({ safe: true, reason: "Verified safe test" });
+    expect(res).toEqual({ safe: true, reason: "Verified safe test", model: "mock-model" });
   });
 });
 
@@ -1200,7 +1201,7 @@ describe("config utilities", () => {
   });
 
   test("loadGuardConfig returns empty object when file not found", () => {
-    const config = loadGuardConfig("/tmp/nonexistent-guard-dir-xyz");
+    const config = loadGuardConfig("/tmp/nonexistent-guard-dir-xyz", "/tmp/nonexistent-home-dir-xyz");
     expect(config).toEqual({});
   });
 });
