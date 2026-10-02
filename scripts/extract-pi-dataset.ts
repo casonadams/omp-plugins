@@ -238,8 +238,8 @@ async function extractDataset() {
     "utf8",
   );
 
-  // Write SFT format
-  const toSft = (s: JevClassifierSample): SftChatSample => ({
+  // Write SFT format (standard open models: assistant role)
+  const toSft = (s: JevClassifierSample, roleName: "assistant" | "model" = "assistant"): SftChatSample => ({
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       {
@@ -250,21 +250,32 @@ async function extractDataset() {
           options: s.options,
         }),
       },
-      { role: "assistant", content: JSON.stringify(s.target) },
+      { role: roleName, content: JSON.stringify(s.target) },
     ],
   });
 
   fs.writeFileSync(
     path.join(OUTPUT_DIR, "sft_train.jsonl"),
-    trainSamples.map((s) => JSON.stringify(toSft(s))).join("\n") + "\n",
+    trainSamples.map((s) => JSON.stringify(toSft(s, "assistant"))).join("\n") + "\n",
     "utf8",
   );
   fs.writeFileSync(
     path.join(OUTPUT_DIR, "sft_dev.jsonl"),
-    devSamples.map((s) => JSON.stringify(toSft(s))).join("\n") + "\n",
+    devSamples.map((s) => JSON.stringify(toSft(s, "assistant"))).join("\n") + "\n",
     "utf8",
   );
 
+  // Write Gemini / Vertex AI Supervised Tuning format (model role)
+  fs.writeFileSync(
+    path.join(OUTPUT_DIR, "gemini_train.jsonl"),
+    trainSamples.map((s) => JSON.stringify(toSft(s, "model"))).join("\n") + "\n",
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(OUTPUT_DIR, "gemini_dev.jsonl"),
+    devSamples.map((s) => JSON.stringify(toSft(s, "model"))).join("\n") + "\n",
+    "utf8",
+  );
   const totalApproved = samples.filter((s) => s.target.key === "safe_allow").length;
   const totalDenied = samples.filter((s) => s.target.key === "deny").length;
 
