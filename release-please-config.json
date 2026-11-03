@@ -11,6 +11,11 @@
       "release-type": "node",
       "package-name": "history",
       "component": "history"
+    },
+    "plugins/gate": {
+      "release-type": "node",
+      "package-name": "gate",
+      "component": "gate"
     }
   }
 }

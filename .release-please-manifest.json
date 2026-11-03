@@ -1,4 +1,5 @@
 {
   "plugins/guard": "0.7.0",
-  "plugins/history": "1.0.0"
+  "plugins/history": "1.0.0",
+  "plugins/gate": "0.1.0"
 }

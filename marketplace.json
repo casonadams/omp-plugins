@@ -18,6 +18,13 @@
       "category": "utilities",
       "source": "./plugins/history",
       "homepage": "https://github.com/casonadams/omp-plugins"
+    },
+    {
+      "name": "gate",
+      "description": "Completion gate: blocks git commit until ripwire verification passes and asks for a Gate summary before a turn ends",
+      "category": "quality",
+      "source": "./plugins/gate",
+      "homepage": "https://github.com/casonadams/omp-plugins"
     }
   ]
 }
