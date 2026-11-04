@@ -4,6 +4,9 @@ const DECLARATIONS: RegExp[] = [
   /^\+\s*export\s+(?:default\s+)?(?:async\s+)?(?:function\*?|class|const|interface|type|enum)\s+([A-Za-z_$][\w$]*)/,
   /^\+(?:async\s+)?(?:def|class)\s+([A-Za-z]\w*)/,
   /^\+func\s+(?:\([^)]*\)\s*)?([A-Z]\w*)/,
+  /^\+\s*(?:(?:abstract|sealed|base|final|interface)\s+)*(?:class|mixin|enum|extension(?:\s+type)?|typedef)\s+([A-Za-z]\w*)/,
+  /^\+\s*(?:(?:external|static)\s+)*(?!(?:return|throw|await|case|yield|assert|if|while|switch|for|catch|else|finally|break|continue|default|rethrow|fn|func|function|var|let|const|pub|import|export|part|library)\b)(?:void|[A-Za-z]\w*(?:<[^;{()]+>)?\??\s+)?(?:get\s+|set\s+)?([A-Za-z]\w*)\s*\(/,
+  /^\+\s*(?:(?:external|static)\s+)*(?!(?:return|throw|await|case|yield|assert|if|while|switch|for|catch|else|finally|break|continue|default|rethrow|fn|func|function|var|let|const|pub|import|export|part|library)\b)(?:void|[A-Za-z]\w*(?:<[^;{()]+>)?\??\s+)?get\s+([A-Za-z]\w*)\b/,
 ];
 
 /** Public symbols declared on the added lines of a `git diff -U0` text, unique, in order. */

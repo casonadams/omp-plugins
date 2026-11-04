@@ -2,7 +2,7 @@ import { brokenContract, gatingRows, partnerFiles, untestedRows } from "./parse"
 import { addedSymbols } from "./symbols";
 import type { Exec, GateReport } from "./types";
 
-const SOURCE = /\.(rs|ts|tsx|js|jsx|mjs|py|go|c|h|cc|cpp|hpp|java|kt|swift|rb|php|cs|scala)$/;
+const SOURCE = /\.(rs|ts|tsx|js|jsx|mjs|py|go|c|h|cc|cpp|hpp|java|kt|swift|rb|php|cs|scala|dart)$/;
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbd2cd4c";
 const MAX_ROWS = 10;
 const MAX_PARTNERS = 5;

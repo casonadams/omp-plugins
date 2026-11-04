@@ -14,8 +14,40 @@ describe("addedSymbols", () => {
       "+def _hidden():",
       "+func (s *S) Serve() {}",
       "+func helper() {}",
+      "+class Service {}",
+      "+abstract class BaseRepo<T> {}",
+      "+mixin Logging {}",
+      "+enum Direction { north, south }",
+      "+extension StrExt on String {}",
+      "+typedef Predicate<T> = bool Function(T);",
+      "+void main() {}",
+      "+Future<List<String>> fetchItems() async {}",
+      "+String get title => _title;",
+      "+set count(int v) {}",
+      "+class _PrivateWidget {}",
+      "+void _internalHelper() {}",
+      "+int _hiddenCount = 0;",
+      "+    return print(123);",
+      "+    if (isValid()) {",
     ].join("\n");
-    expect(addedSymbols(diff)).toEqual(["run", "Inner", "boot", "Opts", "handler", "Serve"]);
+    expect(addedSymbols(diff)).toEqual([
+      "run",
+      "Inner",
+      "boot",
+      "Opts",
+      "handler",
+      "Serve",
+      "Service",
+      "BaseRepo",
+      "Logging",
+      "Direction",
+      "StrExt",
+      "Predicate",
+      "main",
+      "fetchItems",
+      "title",
+      "count",
+    ]);
   });
 
   test("lists a symbol once", () => {
