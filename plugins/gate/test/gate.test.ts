@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveBinary, runGate } from "../src/gate";
+import { changedSources, resolveBinary, runGate } from "../src/gate";
 import { fakeExec, NOT_FOUND, type Handler } from "./helpers";
 
 const REPO: Handler = (cmd, args) => {
@@ -57,6 +57,19 @@ describe("runGate", () => {
       ),
     );
     expect((await runGate(clean.exec, "/r")).lines).toEqual(["gate: no source changed"]);
+  });
+
+  test("changedSources includes dart source files", async () => {
+    const { exec } = fakeExec((cmd, args) => {
+      if (cmd === "git" && args.includes("--name-only"))
+        return { stdout: "lib/main.dart\nREADME.md\n" };
+      if (cmd === "git" && args.includes("ls-files")) return { stdout: "test/widget_test.dart\n" };
+      return undefined;
+    });
+    expect(await changedSources(exec, "/r", "HEAD")).toEqual([
+      "lib/main.dart",
+      "test/widget_test.dart",
+    ]);
   });
 
   test("an unborn branch is compared with the empty tree", async () => {
