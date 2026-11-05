@@ -1,5 +1,14 @@
 import type { BlockResult, ExtensionContext, SecurityAudit } from "./types";
 
+export type PromptDecisionKind = "proceed" | "cancel" | "feedback" | "headless";
+
+export interface PromptOutcome {
+  blockResult?: BlockResult;
+  decision: {
+    kind: PromptDecisionKind;
+    feedback?: string;
+  };
+}
 interface FormattedAudit {
   auditBlock: string;
   auditSummary: string;
@@ -22,7 +31,7 @@ async function promptViaAskDialog(
   command: string,
   audit: FormattedAudit,
   language: string,
-): Promise<BlockResult | void> {
+): Promise<PromptOutcome> {
   const res = await ui.askDialog!([
     {
       id: "guard_approval",
@@ -45,18 +54,26 @@ async function promptViaAskDialog(
 
   if (res?.kind === "submit") {
     const selected = res.results[0]?.selectedOptions[0];
-    if (selected === "Proceed") return;
+    if (selected === "Proceed") {
+      return { decision: { kind: "proceed" } };
+    }
     if (res.results[0]?.customInput) {
       return {
-        block: true,
-        reason: `User denied execution with feedback: ${res.results[0].customInput}`,
+        blockResult: {
+          block: true,
+          reason: `User denied execution with feedback: ${res.results[0].customInput}`,
+        },
+        decision: { kind: "feedback", feedback: res.results[0].customInput },
       };
     }
   }
 
   return {
-    block: true,
-    reason: `User denied execution: ${audit.auditSummary}`,
+    blockResult: {
+      block: true,
+      reason: `User denied execution: ${audit.auditSummary}`,
+    },
+    decision: { kind: "cancel" },
   };
 }
 
@@ -66,21 +83,26 @@ async function promptViaConfirm(
   command: string,
   audit: FormattedAudit,
   language: string,
-): Promise<BlockResult | void> {
+): Promise<PromptOutcome> {
   const approved = await ui.confirm!(
     header,
     `Security Audit:\n${audit.auditBlock}\n\n${language === "bash" ? "Command:\n$" : "Script:"} ${command}`,
   );
-  if (approved) return;
-  return { block: true, reason: `User denied execution: ${audit.auditSummary}` };
+  if (approved) {
+    return { decision: { kind: "proceed" } };
+  }
+  return {
+    blockResult: { block: true, reason: `User denied execution: ${audit.auditSummary}` },
+    decision: { kind: "cancel" },
+  };
 }
 
-export async function promptUser(
+export async function promptUserDetailed(
   ctx: ExtensionContext | undefined,
   command: string,
   audit: string | SecurityAudit,
   language: string = "bash",
-): Promise<BlockResult | void> {
+): Promise<PromptOutcome> {
   const formatted = formatAudit(audit);
   const guardHeader = language === "bash" ? "Bash Guard" : "Eval Guard";
   const blockedPrefix =
@@ -90,8 +112,11 @@ export async function promptUser(
 
   if (!ctx?.hasUI) {
     return {
-      block: true,
-      reason: `${blockedPrefix} (headless mode): ${formatted.auditSummary}`,
+      blockResult: {
+        block: true,
+        reason: `${blockedPrefix} (headless mode): ${formatted.auditSummary}`,
+      },
+      decision: { kind: "headless" },
     };
   }
 
@@ -104,7 +129,20 @@ export async function promptUser(
   }
 
   return {
-    block: true,
-    reason: `${blockedPrefix} (headless mode): ${formatted.auditSummary}`,
+    blockResult: {
+      block: true,
+      reason: `${blockedPrefix} (headless mode): ${formatted.auditSummary}`,
+    },
+    decision: { kind: "headless" },
   };
+}
+
+export async function promptUser(
+  ctx: ExtensionContext | undefined,
+  command: string,
+  audit: string | SecurityAudit,
+  language: string = "bash",
+): Promise<BlockResult | void> {
+  const outcome = await promptUserDetailed(ctx, command, audit, language);
+  return outcome.blockResult;
 }

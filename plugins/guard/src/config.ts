@@ -10,15 +10,24 @@ export interface GuardProductionConfig {
   markers?: string[];
 }
 
+export interface GuardTelemetryConfig {
+  enabled?: boolean;
+  path?: string;
+}
+
 export interface GuardConfig {
   production?: GuardProductionConfig;
   allowlist?: string[];
+  telemetry?: GuardTelemetryConfig;
 }
 
 export const DEFAULT_PRODUCTION_MARKERS = ["prod", "prd", "production", "live", "kube-system"];
 
-export function findGuardConfigFile(cwd: string = process.cwd()): string | undefined {
-  const home = os.homedir();
+export function findGuardConfigFile(
+  cwd: string = process.cwd(),
+  homeDir: string = os.homedir(),
+): string | undefined {
+  const home = homeDir;
   const candidates = [
     path.join(cwd, ".guard.yml"),
     path.join(cwd, ".guard.yaml"),
@@ -40,8 +49,8 @@ export function findGuardConfigFile(cwd: string = process.cwd()): string | undef
   return undefined;
 }
 
-export function loadGuardConfig(cwd?: string): GuardConfig {
-  const configFile = findGuardConfigFile(cwd);
+export function loadGuardConfig(cwd?: string, homeDir?: string): GuardConfig {
+  const configFile = findGuardConfigFile(cwd, homeDir);
   if (!configFile) return {};
 
   try {

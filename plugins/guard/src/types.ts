@@ -14,6 +14,8 @@ export interface GuardVerdict {
   safe: boolean;
   action?: string;
   reason: string;
+  model?: string;
+  rawAnswers?: Record<string, unknown>;
 }
 
 export interface SecurityAudit {

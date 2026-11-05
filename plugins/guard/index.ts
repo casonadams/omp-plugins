@@ -1,8 +1,16 @@
-import { isAllowlistedCommand, loadGuardConfig } from "./src/config";
+import { isAllowlistedCommand, loadGuardConfig, resolveProductionMarkers } from "./src/config";
 import { CRITICAL_DANGER_REGEX, getCriticalDangerAudit } from "./src/constants";
 import { evaluateCommandSafetyWithFallback, resolveGuardCandidates } from "./src/guard-model";
+import {
+  createDecisionRecord,
+  isTelemetryEnabled,
+  logGuardDecision,
+  resolveTelemetryPath,
+  type DecisionSource,
+  type DecisionTargetKey,
+} from "./src/telemetry";
 import type { BlockResult, ExtensionContext, PiExtensionAPI, ToolCallEvent } from "./src/types";
-import { promptUser } from "./src/ui";
+import { promptUser, promptUserDetailed, type PromptOutcome } from "./src/ui";
 
 export {
   CRITICAL_DANGER_REGEX,
@@ -23,8 +31,24 @@ export {
   resolveGuardModel,
 } from "./src/guard-model";
 export { isAllowlistedCommand, loadGuardConfig, resolveProductionMarkers } from "./src/config";
+export {
+  DEFAULT_JEV_OPTIONS,
+  DEFAULT_JEV_QUESTION,
+  TARGET_LABELS,
+  createDecisionRecord,
+  isTelemetryEnabled,
+  logGuardDecision,
+  resolveTelemetryPath,
+} from "./src/telemetry";
+export type {
+  DecisionSource,
+  DecisionTargetKey,
+  JevDecisionOption,
+  JevDecisionRecord,
+} from "./src/telemetry";
 export type * from "./src/types";
-export { promptUser } from "./src/ui";
+export { promptUser, promptUserDetailed } from "./src/ui";
+export type { PromptDecisionKind, PromptOutcome } from "./src/ui";
 
 export default function registerBashGuard(pi: PiExtensionAPI) {
   pi.on(
@@ -44,19 +68,100 @@ export default function registerBashGuard(pi: PiExtensionAPI) {
       }
 
       if (!content) return;
+      const startTime = Date.now();
+      const guardConfig = loadGuardConfig(ctx?.cwd);
+      const markers = resolveProductionMarkers(guardConfig);
+      const telemetryEnabled = isTelemetryEnabled(guardConfig);
+      const telemetryPath = resolveTelemetryPath(guardConfig);
+
+      const resolvePromptTarget = (
+        outcome: PromptOutcome,
+      ): { targetKey: DecisionTargetKey; source: DecisionSource; feedback: string | null } => {
+        if (outcome.decision.kind === "proceed") {
+          return { targetKey: "safe_auto_allow", source: "user_proceed", feedback: null };
+        }
+        if (outcome.decision.kind === "feedback") {
+          return {
+            targetKey: "hard_deny",
+            source: "user_feedback",
+            feedback: outcome.decision.feedback || null,
+          };
+        }
+        if (outcome.decision.kind === "headless") {
+          return { targetKey: "ask_confirmation", source: "headless_block", feedback: null };
+        }
+        return { targetKey: "ask_confirmation", source: "user_cancel", feedback: null };
+      };
 
       if (CRITICAL_DANGER_REGEX.test(content)) {
-        return promptUser(ctx, content, getCriticalDangerAudit(content), language);
+        const audit = getCriticalDangerAudit(content);
+        const outcome = await promptUserDetailed(ctx, content, audit, language);
+        if (telemetryEnabled) {
+          const resolved = resolvePromptTarget(outcome);
+          logGuardDecision(
+            createDecisionRecord({
+              command: content,
+              language,
+              cwd: ctx?.cwd,
+              markers,
+              modelVerdict: {
+                safe: false,
+                action: audit.action,
+                reason: audit.reason,
+              },
+              targetKey: resolved.targetKey,
+              source: resolved.source,
+              feedback: resolved.feedback,
+              latencyMs: Date.now() - startTime,
+            }),
+            telemetryPath,
+          );
+        }
+        return outcome.blockResult;
       }
 
-      const guardConfig = loadGuardConfig(ctx?.cwd);
       if (isAllowlistedCommand(content, guardConfig)) {
+        if (telemetryEnabled) {
+          logGuardDecision(
+            createDecisionRecord({
+              command: content,
+              language,
+              cwd: ctx?.cwd,
+              markers,
+              targetKey: "safe_auto_allow",
+              source: "allowlist",
+              latencyMs: Date.now() - startTime,
+            }),
+            telemetryPath,
+          );
+        }
         return;
       }
 
       const guard = await resolveGuardCandidates(ctx);
       if ("block" in guard) {
-        return promptUser(ctx, content, guard.reason, language);
+        const outcome = await promptUserDetailed(ctx, content, guard.reason, language);
+        if (telemetryEnabled) {
+          const resolved = resolvePromptTarget(outcome);
+          logGuardDecision(
+            createDecisionRecord({
+              command: content,
+              language,
+              cwd: ctx?.cwd,
+              markers,
+              modelVerdict: {
+                safe: false,
+                reason: guard.reason,
+              },
+              targetKey: resolved.targetKey,
+              source: resolved.source,
+              feedback: resolved.feedback,
+              latencyMs: Date.now() - startTime,
+            }),
+            telemetryPath,
+          );
+        }
+        return outcome.blockResult;
       }
 
       const verdict = await evaluateCommandSafetyWithFallback(
@@ -68,18 +173,60 @@ export default function registerBashGuard(pi: PiExtensionAPI) {
         guardConfig,
       );
       if (!verdict.safe) {
-        return promptUser(
-          ctx,
-          content,
-          {
-            action: verdict.action,
-            reason:
-              verdict.reason ||
-              (language === "bash"
-                ? "Action modifies state, cloud resources, or data."
-                : "Script executes processes, modifies state, or mutates data."),
-          },
-          language,
+        const audit = {
+          action: verdict.action,
+          reason:
+            verdict.reason ||
+            (language === "bash"
+              ? "Action modifies state, cloud resources, or data."
+              : "Script executes processes, modifies state, or mutates data."),
+        };
+        const outcome = await promptUserDetailed(ctx, content, audit, language);
+        if (telemetryEnabled) {
+          const resolved = resolvePromptTarget(outcome);
+          logGuardDecision(
+            createDecisionRecord({
+              command: content,
+              language,
+              cwd: ctx?.cwd,
+              markers,
+              modelVerdict: {
+                model: verdict.model,
+                safe: false,
+                action: verdict.action,
+                reason: verdict.reason,
+                raw: verdict.rawAnswers,
+              },
+              targetKey: resolved.targetKey,
+              source: resolved.source,
+              feedback: resolved.feedback,
+              latencyMs: Date.now() - startTime,
+            }),
+            telemetryPath,
+          );
+        }
+        return outcome.blockResult;
+      }
+
+      if (telemetryEnabled) {
+        logGuardDecision(
+          createDecisionRecord({
+            command: content,
+            language,
+            cwd: ctx?.cwd,
+            markers,
+            modelVerdict: {
+              model: verdict.model,
+              safe: true,
+              action: verdict.action,
+              reason: verdict.reason,
+              raw: verdict.rawAnswers,
+            },
+            targetKey: "safe_auto_allow",
+            source: "model_safe",
+            latencyMs: Date.now() - startTime,
+          }),
+          telemetryPath,
         );
       }
     },
