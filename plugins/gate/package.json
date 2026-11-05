@@ -1,6 +1,6 @@
 {
   "name": "gate",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Completion gate for omp: blocks git commit until ripwire-rs verification passes, and asks for a Gate summary before a turn ends",
   "type": "module",
   "main": "index.ts",
