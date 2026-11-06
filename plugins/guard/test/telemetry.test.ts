@@ -2,8 +2,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
-import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
+import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+
+registerMockApi();
 import registerBashGuard, {
   createDecisionRecord,
   isTelemetryEnabled,
