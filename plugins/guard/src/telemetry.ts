@@ -28,6 +28,8 @@ export interface JevDecisionRecord {
     language: string;
     cwd: string;
     production_markers: string[];
+    preview_markers?: string[];
+    is_preview_environment?: boolean;
   };
   question: string;
   options: JevDecisionOption[];
@@ -73,10 +75,7 @@ export const TARGET_LABELS: Record<DecisionTargetKey, "A" | "B" | "C"> = {
   hard_deny: "C",
 };
 
-export function resolveTelemetryPath(
-  config?: GuardConfig,
-  homeDir: string = os.homedir(),
-): string {
+export function resolveTelemetryPath(config?: GuardConfig, homeDir: string = os.homedir()): string {
   if (process.env.GUARD_TELEMETRY_PATH) {
     return process.env.GUARD_TELEMETRY_PATH;
   }
@@ -101,6 +100,8 @@ export function createDecisionRecord(params: {
   language?: string;
   cwd?: string;
   markers?: string[];
+  previewMarkers?: string[];
+  isPreviewEnvironment?: boolean;
   modelVerdict?: {
     model?: string;
     safe: boolean;
@@ -124,6 +125,10 @@ export function createDecisionRecord(params: {
       language: params.language || "bash",
       cwd: params.cwd || process.cwd(),
       production_markers: params.markers || [],
+      ...(params.previewMarkers ? { preview_markers: params.previewMarkers } : {}),
+      ...(typeof params.isPreviewEnvironment === "boolean"
+        ? { is_preview_environment: params.isPreviewEnvironment }
+        : {}),
     },
     question: DEFAULT_JEV_QUESTION,
     options: DEFAULT_JEV_OPTIONS,
@@ -138,10 +143,7 @@ export function createDecisionRecord(params: {
   };
 }
 
-export function logGuardDecision(
-  record: JevDecisionRecord,
-  customPath?: string,
-): void {
+export function logGuardDecision(record: JevDecisionRecord, customPath?: string): void {
   try {
     const targetPath = customPath || resolveTelemetryPath();
     const dir = path.dirname(targetPath);

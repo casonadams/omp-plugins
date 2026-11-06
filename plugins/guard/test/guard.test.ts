@@ -21,6 +21,10 @@ import registerBashGuard, {
   promptUser,
   resolveGuardCandidates,
   resolveGuardModel,
+  DEFAULT_PREVIEW_MARKERS,
+  isCommandTargetingPreview,
+  isCommandTargetingProduction,
+  resolvePreviewMarkers,
   resolveProductionMarkers,
 } from "../index";
 
@@ -1201,7 +1205,10 @@ describe("config utilities", () => {
   });
 
   test("loadGuardConfig returns empty object when file not found", () => {
-    const config = loadGuardConfig("/tmp/nonexistent-guard-dir-xyz", "/tmp/nonexistent-home-dir-xyz");
+    const config = loadGuardConfig(
+      "/tmp/nonexistent-guard-dir-xyz",
+      "/tmp/nonexistent-home-dir-xyz",
+    );
     expect(config).toEqual({});
   });
 });
@@ -1564,5 +1571,174 @@ describe("registerBashGuard eval tool interception", () => {
     registerBashGuard(mockPi as unknown as Parameters<typeof registerBashGuard>[0]);
     expect(await toolCallHandler!({ toolName: "eval", input: { code: "" } })).toBeUndefined();
     expect(await toolCallHandler!({ toolName: "eval", input: {} })).toBeUndefined();
+  });
+});
+
+describe("preview environment detection & evaluation", () => {
+  test("resolvePreviewMarkers returns defaults when no config provided", () => {
+    const markers = resolvePreviewMarkers({});
+    expect(markers).toEqual(DEFAULT_PREVIEW_MARKERS);
+  });
+
+  test("resolvePreviewMarkers includes custom markers, namespaces, domains, and clusters", () => {
+    const markers = resolvePreviewMarkers({
+      preview: {
+        markers: ["ephemeral-box"],
+        namespaces: ["review-*"],
+        domains: ["*.preview.company.com"],
+        clusters: ["dev-sandbox-*"],
+      },
+    });
+    expect(markers).toContain("pr-");
+    expect(markers).toContain("preview");
+    expect(markers).toContain("ephemeral-box");
+    expect(markers).toContain("review-");
+    expect(markers).toContain(".preview.company.com");
+    expect(markers).toContain("dev-sandbox-");
+  });
+
+  test("isCommandTargetingProduction detects prod markers and flags", () => {
+    expect(isCommandTargetingProduction("kubectl -n prod get pods", {})).toBe(true);
+    expect(isCommandTargetingProduction("kubectl --namespace=prd get secret", {})).toBe(true);
+    expect(isCommandTargetingProduction("kubectl -n kube-system logs coredns", {})).toBe(true);
+    expect(
+      isCommandTargetingProduction("kubectl --context=gke-prod-us-central1 get pods", {}),
+    ).toBe(true);
+    expect(isCommandTargetingProduction("curl https://api.prod.previ.com/v1/health", {})).toBe(
+      true,
+    );
+    expect(isCommandTargetingProduction("kubectl -n pr-499 get pods", {})).toBe(false);
+  });
+
+  test("isCommandTargetingPreview identifies user's exact curl + kubectl preview command", () => {
+    const userCommand =
+      'curl -s -X POST "https://pr-499-b2b.dev.previ.dev/auth/v1/token?grant_type=password" \\\n' +
+      '  -H "Content-Type: application/json" \\\n' +
+      "  -H \"apikey: $(kubectl -n pr-499 get secret b2b-gotrue-secrets -o jsonpath='{.data.SUPABASE_ANON_KEY}' | base64 -d)\" \\\n" +
+      '  -d \'{"email":"superadmin@previ.dev","password":"Xijf5UNJmob2RvUgWZcztaJrHDQ8p6-EBEUYfCantp6J7CeeaA1!"}\' | jq \'{user_id: .user.id, email: .user.email, role: .user.role}\'';
+
+    expect(isCommandTargetingPreview(userCommand, {})).toBe(true);
+  });
+
+  test("isCommandTargetingPreview identifies preview kubectl namespaces and hosts", () => {
+    expect(isCommandTargetingPreview("kubectl -n pr-499 get pods", {})).toBe(true);
+    expect(isCommandTargetingPreview("kubectl --namespace=pr-499-b2b logs my-pod", {})).toBe(true);
+    expect(isCommandTargetingPreview("kubectl -n preview-test get secret", {})).toBe(true);
+    expect(isCommandTargetingPreview("curl https://pr-1234.dev.previ.dev/status", {})).toBe(true);
+  });
+
+  test("isCommandTargetingPreview yields to production when prod markers are present", () => {
+    expect(
+      isCommandTargetingPreview(
+        "kubectl -n prod exec my-pod -- curl https://pr-499-b2b.dev.previ.dev",
+        {},
+      ),
+    ).toBe(false);
+  });
+
+  test("parseSystemOneOutput relaxes P2 threshold and accepts safe_preview / ambiguous in preview", () => {
+    // P2 risk at 0.20 is rejected in non-preview (threshold 0.10)
+    const dataP2Risk = {
+      answers: {
+        p1_prod_impact: { type: "noul", noul: 0.01 },
+        p2_malicious: { type: "noul", noul: 0.2 },
+        p3_local_impact: { type: "choice", choice: "safe_preview" },
+      },
+    };
+
+    const nonPreviewVerdict = parseSystemOneOutput(dataP2Risk, false);
+    expect(nonPreviewVerdict.safe).toBe(false);
+    expect(nonPreviewVerdict.action).toBe("security_violation");
+
+    // Same P2 risk (0.20) is accepted in preview (threshold 0.40)
+    const previewVerdict = parseSystemOneOutput(dataP2Risk, true);
+    expect(previewVerdict.safe).toBe(true);
+    expect(previewVerdict.action).toBe("safe_preview");
+  });
+
+  test("parseSystemOneOutput still blocks true high-risk malicious activity in preview", () => {
+    const dataHighMalicious = {
+      answers: {
+        p1_prod_impact: { type: "noul", noul: 0.01 },
+        p2_malicious: { type: "noul", noul: 0.75 },
+        p3_local_impact: { type: "choice", choice: "safe_preview" },
+      },
+    };
+
+    const previewVerdict = parseSystemOneOutput(dataHighMalicious, true);
+    expect(previewVerdict.safe).toBe(false);
+    expect(previewVerdict.action).toBe("security_violation");
+  });
+
+  test("parseSystemOneOutput still blocks production mutation even if targeted in preview context", () => {
+    const dataProdMutation = {
+      answers: {
+        p1_prod_impact: { type: "noul", noul: 0.25 },
+        p2_malicious: { type: "noul", noul: 0.02 },
+        p3_local_impact: { type: "choice", choice: "safe_preview" },
+      },
+    };
+
+    const previewVerdict = parseSystemOneOutput(dataProdMutation, true);
+    expect(previewVerdict.safe).toBe(false);
+    expect(previewVerdict.action).toBe("production_mutation");
+  });
+
+  test("parseSystemOneOutput accepts ambiguous workspace impact when in preview", () => {
+    const dataAmbiguous = {
+      answers: {
+        p1_prod_impact: { type: "noul", noul: 0.01 },
+        p2_malicious: { type: "noul", noul: 0.05 },
+        p3_local_impact: { type: "choice", choice: "ambiguous" },
+      },
+    };
+
+    const nonPreviewVerdict = parseSystemOneOutput(dataAmbiguous, false);
+    expect(nonPreviewVerdict.safe).toBe(false);
+    expect(nonPreviewVerdict.action).toBe("ambiguous");
+
+    const previewVerdict = parseSystemOneOutput(dataAmbiguous, true);
+    expect(previewVerdict.safe).toBe(true);
+    expect(previewVerdict.action).toBe("safe_preview");
+  });
+
+  test("evaluateSystemOneSafety sends preview state and evaluates preview command safely", async () => {
+    let requestBody:
+      { state?: { is_preview_environment?: boolean; preview_markers?: string[] } } | undefined;
+
+    const mockFetch = async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.body) {
+        requestBody = JSON.parse(String(init.body));
+      }
+      return new Response(
+        JSON.stringify({
+          answers: {
+            p1_prod_impact: { type: "noul", noul: 0.001 },
+            p2_malicious: { type: "noul", noul: 0.15 },
+            p3_local_impact: { type: "choice", choice: "safe_preview" },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    const model = { api: "typesafe", provider: "typesafe", id: "jev-latest" } as Model<Api>;
+    const controller = new AbortController();
+    const command =
+      'kubectl -n pr-499 get secret b2b-gotrue-secrets -o jsonpath="{.data.SUPABASE_ANON_KEY}"';
+
+    const verdict = await evaluateSystemOneSafety(
+      model,
+      "test-api-key",
+      command,
+      controller.signal,
+      "bash",
+      mockFetch as unknown as typeof fetch,
+    );
+
+    expect(requestBody?.state?.is_preview_environment).toBe(true);
+    expect(requestBody?.state?.preview_markers).toContain("pr-");
+    expect(verdict.safe).toBe(true);
+    expect(verdict.action).toBe("safe_preview");
   });
 });

@@ -8,7 +8,9 @@ import type { ExtensionContext, GuardModelCandidate, GuardVerdict } from "./type
 import {
   type GuardConfig,
   isAllowlistedCommand,
+  isCommandTargetingPreview,
   loadGuardConfig,
+  resolvePreviewMarkers,
   resolveProductionMarkers,
 } from "./config";
 
@@ -262,13 +264,23 @@ export function parseGuardOutput(text: string): GuardVerdict {
   };
 }
 
+interface ChatSafetyOptions {
+  apiKey?: string;
+  signal: AbortSignal;
+  language?: string;
+  isPreview?: boolean;
+  previewMarkers?: string[];
+}
+
 async function evaluateChatSafety(
   model: Model<Api>,
-  apiKey: string | undefined,
   command: string,
-  signal: AbortSignal,
-  language: string = "bash",
+  options: ChatSafetyOptions,
 ): Promise<GuardVerdict> {
+  const { apiKey, signal, language = "bash", isPreview = false, previewMarkers = [] } = options;
+  const contextNotes = isPreview
+    ? `\n<environment_context>\nTarget: Ephemeral Preview Environment\nPreview Markers: ${previewMarkers.join(", ")}\nThis command is targeted at a disposable, non-production preview environment. Querying preview secrets or interacting with preview APIs is legitimate developer testing.\n</environment_context>`
+    : "";
   const response = await completeSimple(
     model,
     {
@@ -279,7 +291,7 @@ async function evaluateChatSafety(
           content: [
             {
               type: "text",
-              text: `<command_to_evaluate language="${language}">\n${command}\n</command_to_evaluate>`,
+              text: `${contextNotes}\n<command_to_evaluate language="${language}">\n${command}\n</command_to_evaluate>`,
             },
           ],
           timestamp: Date.now(),
@@ -318,9 +330,17 @@ function evaluateP1(answers: Record<string, any>): GuardVerdict | undefined {
   return undefined;
 }
 
-function evaluateP2(answers: Record<string, any>): GuardVerdict | undefined {
+function evaluateP2(
+  answers: Record<string, any>,
+  isPreview: boolean = false,
+): GuardVerdict | undefined {
   const maliciousRisk = answers.p2_malicious?.noul;
-  if (typeof maliciousRisk === "number" && !Number.isNaN(maliciousRisk) && maliciousRisk > 0.1) {
+  const threshold = isPreview ? 0.4 : 0.1;
+  if (
+    typeof maliciousRisk === "number" &&
+    !Number.isNaN(maliciousRisk) &&
+    maliciousRisk > threshold
+  ) {
     const pct = Math.round(maliciousRisk * 100);
     return {
       safe: false,
@@ -331,15 +351,24 @@ function evaluateP2(answers: Record<string, any>): GuardVerdict | undefined {
   return undefined;
 }
 
-function evaluateP3(answers: Record<string, any>): GuardVerdict | undefined {
+function evaluateP3(
+  answers: Record<string, any>,
+  isPreview: boolean = false,
+): GuardVerdict | undefined {
   const localImpact = answers.p3_local_impact?.choice;
   if (localImpact) {
-    const isSafe = localImpact === "safe_local" || localImpact === "cache_cleanup";
+    const isSafe =
+      localImpact === "safe_local" ||
+      localImpact === "cache_cleanup" ||
+      localImpact === "safe_preview" ||
+      (isPreview && localImpact === "ambiguous");
     return {
       safe: isSafe,
-      action: localImpact,
+      action: isSafe && isPreview && localImpact === "ambiguous" ? "safe_preview" : localImpact,
       reason: isSafe
-        ? "Command verified safe by System One."
+        ? isPreview && (localImpact === "safe_preview" || localImpact === "ambiguous")
+          ? "Command verified safe in preview environment by System One."
+          : "Command verified safe by System One."
         : `Priority 3 alert: Local workspace impact classified as [${localImpact}].`,
     };
   }
@@ -363,7 +392,7 @@ function evaluateLegacyAnswer(answers: Record<string, any>): GuardVerdict {
   throw new Error("Missing safety probability in System One response");
 }
 
-export function parseSystemOneOutput(data: unknown): GuardVerdict {
+export function parseSystemOneOutput(data: unknown, isPreview: boolean = false): GuardVerdict {
   if (!data || typeof data !== "object") {
     throw new Error("Invalid response format from System One model");
   }
@@ -379,12 +408,11 @@ export function parseSystemOneOutput(data: unknown): GuardVerdict {
     }
   }
 
-  const verdict = (
+  const verdict =
     evaluateP1(answers) ||
-    evaluateP2(answers) ||
-    evaluateP3(answers) ||
-    evaluateLegacyAnswer(answers)
-  );
+    evaluateP2(answers, isPreview) ||
+    evaluateP3(answers, isPreview) ||
+    evaluateLegacyAnswer(answers);
   verdict.rawAnswers = answers;
   return verdict;
 }
@@ -431,6 +459,8 @@ export async function evaluateSystemOneSafety(
 
   const config = guardConfig || loadGuardConfig(resolvedCwd);
   const markers = resolveProductionMarkers(config);
+  const previewMarkers = resolvePreviewMarkers(config);
+  const isPreview = isCommandTargetingPreview(command, config);
 
   const res = await fetchFn(endpoint, {
     method: "POST",
@@ -441,26 +471,30 @@ export async function evaluateSystemOneSafety(
         language,
         cwd: resolvedCwd || process.cwd(),
         production_markers: markers,
+        preview_markers: previewMarkers,
+        is_preview_environment: isPreview,
       },
       model: model.id || "jev-latest",
       questions: {
         p1_prod_impact: {
           type: "noul",
           instructions:
-            "Priority 1 - Production Safety: Does this command or script alter, delete, restart, or mutate production infrastructure, live cloud resources (e.g. gcloud, aws, terraform), production Kubernetes workloads/namespaces, or production databases matching the specified production_markers?",
+            "Priority 1 - Production Safety: Does this command or script alter, delete, restart, or mutate production infrastructure, live cloud resources (e.g. gcloud, aws, terraform), production Kubernetes workloads/namespaces, or production databases matching the specified production_markers? Note: Operations strictly scoped to ephemeral preview/sandbox environments matching preview_markers (such as pr-*) are NOT production.",
         },
         p2_malicious: {
           type: "noul",
           instructions:
-            "Priority 2 - Malicious Activity: Does this command or script attempt credential exfiltration, secret theft (reading ~/.ssh, ~/.aws, .env, tokens), privilege escalation, arbitrary remote script piping, or host tampering?",
+            "Priority 2 - Malicious Activity: Does this command or script attempt unauthorized credential exfiltration, secret theft from the host system (reading ~/.ssh, ~/.aws, root .env, keyrings), privilege escalation, arbitrary remote script piping, or host tampering? Note: Extracting or using disposable non-production test secrets, API tokens, or test passwords within ephemeral preview environments matching specified preview_markers is legitimate developer testing and NOT secret theft.",
         },
         p3_local_impact: {
           type: "choice",
           instructions:
-            "Priority 3 - Local Workspace: Classify the effect of this command on the local developer environment.",
+            "Priority 3 - Local Workspace & Preview Sandbox: Classify the effect of this command on the developer environment.",
           criteria: {
             safe_local:
               "Benign read-only inspection, compiling, testing, linting, or editing inside git-tracked project files.",
+            safe_preview:
+              "Benign developer operations, API requests, or Kubernetes inspections/mutations targeting ephemeral preview environments matching preview_markers.",
             cache_cleanup:
               "Cleaning temporary project build artifacts, target directories, or cache files.",
             destructive_wipe:
@@ -479,7 +513,7 @@ export async function evaluateSystemOneSafety(
   }
 
   const data = await res.json();
-  const verdict = parseSystemOneOutput(data);
+  const verdict = parseSystemOneOutput(data, isPreview);
   verdict.model = model.id || "jev-latest";
   return verdict;
 }
@@ -505,6 +539,9 @@ export async function evaluateCommandSafety(
     };
   }
 
+  const isPreview = isCommandTargetingPreview(command, config);
+  const previewMarkers = resolvePreviewMarkers(config);
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 4000);
 
@@ -521,7 +558,13 @@ export async function evaluateCommandSafety(
         config,
       );
     }
-    return await evaluateChatSafety(model, apiKey, command, controller.signal, language);
+    return await evaluateChatSafety(model, command, {
+      apiKey,
+      signal: controller.signal,
+      language,
+      isPreview,
+      previewMarkers,
+    });
   } catch (err) {
     return {
       safe: false,
