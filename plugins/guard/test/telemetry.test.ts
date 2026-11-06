@@ -75,17 +75,38 @@ describe("telemetry helpers", () => {
     });
   });
 
+  test("createDecisionRecord populates preview_markers and is_preview_environment", () => {
+    const record = createDecisionRecord({
+      command: "kubectl -n pr-499 get secret b2b-gotrue-secrets",
+      markers: ["prod", "prd"],
+      previewMarkers: ["pr-", "preview"],
+      isPreviewEnvironment: true,
+      targetKey: "safe_auto_allow",
+      source: "model_safe",
+      latencyMs: 120,
+    });
+
+    expect(record.state.is_preview_environment).toBe(true);
+    expect(record.state.preview_markers).toEqual(["pr-", "preview"]);
+    expect(record.state.production_markers).toEqual(["prod", "prd"]);
+  });
+
   test("resolveTelemetryPath respects config, env var, and default", () => {
     const defaultPath = resolveTelemetryPath(undefined, "/custom/home");
     expect(defaultPath).toBe("/custom/home/.omp/guard/decisions.jsonl");
 
-    const configured = resolveTelemetryPath({ telemetry: { path: "/tmp/custom.jsonl" } }, "/custom/home");
+    const configured = resolveTelemetryPath(
+      { telemetry: { path: "/tmp/custom.jsonl" } },
+      "/custom/home",
+    );
     expect(configured).toBe("/tmp/custom.jsonl");
 
     const originalEnv = process.env.GUARD_TELEMETRY_PATH;
     try {
       process.env.GUARD_TELEMETRY_PATH = "/env/override.jsonl";
-      expect(resolveTelemetryPath({ telemetry: { path: "/tmp/custom.jsonl" } })).toBe("/env/override.jsonl");
+      expect(resolveTelemetryPath({ telemetry: { path: "/tmp/custom.jsonl" } })).toBe(
+        "/env/override.jsonl",
+      );
     } finally {
       if (originalEnv === undefined) {
         delete process.env.GUARD_TELEMETRY_PATH;

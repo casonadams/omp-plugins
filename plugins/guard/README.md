@@ -65,6 +65,18 @@ production:
     - "production"
     - "live"
 
+preview:
+  # Namespaces, domains, or clusters recognized as ephemeral preview/review environments
+  namespaces:
+    - "pr-*"
+    - "preview-*"
+  domains:
+    - "*.dev.previ.dev"
+  markers:
+    - "pr-"
+    - "preview"
+    - "review-app"
+
 allowlist:
   # Fast regex bypass for trusted non-mutating inspections
   - "^(git (status|diff|log)|cargo (check|test)|npm test)$"
@@ -74,7 +86,15 @@ allowlist:
 
 1. **Priority 1 (Production Mutation)**: Any command altering, deleting, or restarting workloads in production Kubernetes namespaces (`prod`, `prd`), cloud projects, or databases triggers an immediate alert.
 2. **Priority 2 (Malicious Activity)**: Secret exfiltration (`.env`, `~/.ssh`, `~/.aws`), piping remote URLs to shell interpreters, or privilege escalation.
-3. **Priority 3 (Local Workspace Preservation)**: Destructive git history resets and untracked file wipes require confirmation, while benign builds and temporary cache cleanups (`target/`, `.cache`) pass silently.
+3. **Priority 3 (Local Workspace & Sandbox Preservation)**: Destructive git history resets and untracked file wipes require confirmation, while benign builds, temporary cache cleanups (`target/`, `.cache`), and ephemeral preview workflows pass silently.
+
+#### Ephemeral & Preview Environment Handling
+
+When commands target ephemeral preview or review sandbox environments (e.g., `kubectl -n pr-499 ...`, `curl https://pr-499-b2b.dev.previ.dev/...`):
+
+- **No False-Alarm Secret Alerts**: Extracting disposable preview sandbox secrets or passing test tokens to review endpoints is recognized as standard test verification rather than credential exfiltration.
+- **Calibrated Risk Thresholds**: Malicious exfiltration thresholds are relaxed for preview environments (0.40 vs 0.10) to avoid false-positive stops, while host system credentials (`~/.ssh`, `~/.aws`, host keyrings) and catastrophic wipes remain strictly guarded.
+- **Production Invariance**: If a command targets both a preview environment and production namespaces/clusters, production safety strictly overrides and requires human confirmation.
 
 ### Keybindings (Vim `j`/`k` & `Tab` Navigation)
 
