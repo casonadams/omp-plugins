@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.0](https://github.com/casonadams/omp-plugins/compare/guard-v0.7.0...guard-v0.8.0) (2026-11-06)
+
+
+### Features
+
+* **guard:** add native ephemeral preview environment support ([99f4522](https://github.com/casonadams/omp-plugins/commit/99f45224764e31a64fab40779603630dfb9ce889))
+* **guard:** add native ephemeral preview environment support ([7d2c936](https://github.com/casonadams/omp-plugins/commit/7d2c936889d95254141122c5c7afffa98da334fc))
+* **guard:** record structured JEV decision telemetry for fine-tuning ([#12](https://github.com/casonadams/omp-plugins/issues/12)) ([e5341c7](https://github.com/casonadams/omp-plugins/commit/e5341c73e1b9dea2fbce54e1e1e587423529ec4c))
+
 ## [0.7.0](https://github.com/casonadams/omp-plugins/compare/guard-v0.6.0...guard-v0.7.0) (2026-09-29)
 
 
