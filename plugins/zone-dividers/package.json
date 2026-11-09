@@ -1,0 +1,35 @@
+{
+  "name": "zone-dividers",
+  "version": "1.0.0",
+  "description": "Framed thinking divider and matching FINAL ANSWER marker for oh-my-pi transcripts, with eight switchable styles",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "bun run format:check"
+  },
+  "omp": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "keywords": [
+    "omp-plugin",
+    "oh-my-pi",
+    "transcript",
+    "thinking",
+    "divider",
+    "tui"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "wahaha1024",
+    "url": "https://github.com/wahaha1024"
+  },
+  "homepage": "https://github.com/wahaha1024/omp-zone-dividers",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wahaha1024/omp-zone-dividers.git"
+  }
+}
