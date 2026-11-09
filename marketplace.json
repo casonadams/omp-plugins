@@ -25,6 +25,13 @@
       "category": "quality",
       "source": "./plugins/gate",
       "homepage": "https://github.com/casonadams/omp-plugins"
+    },
+    {
+      "name": "zone-dividers",
+      "description": "Framed thinking divider and matching FINAL ANSWER marker for oh-my-pi transcripts, with eight switchable styles",
+      "category": "ui",
+      "source": "./plugins/zone-dividers",
+      "homepage": "https://github.com/wahaha1024/omp-zone-dividers"
     }
   ]
 }
