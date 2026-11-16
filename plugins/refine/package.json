@@ -1,7 +1,7 @@
 {
   "name": "refine",
   "version": "0.1.0",
-  "description": "Read-only repo scans for omp: /refine scan fans out scout subagents over a chosen review profile and reports validated findings",
+  "description": "Read-only repo scans for omp: /refine <profile> fans out scout subagents over balanced slices of the repo and reports validated findings",
   "type": "module",
   "main": "index.ts",
   "scripts": {
