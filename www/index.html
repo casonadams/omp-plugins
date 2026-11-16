@@ -510,8 +510,8 @@
             </div>
 
             <p class="plugin-desc">
-              Automatically syncs successful bash tool commands to your local zsh or bash gate.
-              Enables native gate recall and search via Ctrl+R for all agent-executed commands.
+              Completion gate for omp. Blocks agent git commit until ripwire verification passes,
+              and asks for a Gate summary before a turn that changed source ends.
             </p>
 
             <div class="card-install-box">
@@ -552,7 +552,7 @@
                 >
                   <polyline points="20 6 9 17 4 12"></polyline>
                 </svg>
-                <span>Auto-detects Zsh and Bash gate targets</span>
+                <span>Blocks git commit on failing ripwire edit-check or quality-delta</span>
               </li>
               <li class="card-feature-item">
                 <svg
@@ -567,7 +567,7 @@
                 >
                   <polyline points="20 6 9 17 4 12"></polyline>
                 </svg>
-                <span>Native Zsh extended gate with multiline escaping</span>
+                <span>Recognises commits behind cd, ;, pipes, git -C and rtk prefixes</span>
               </li>
               <li class="card-feature-item">
                 <svg
@@ -582,7 +582,9 @@
                 >
                   <polyline points="20 6 9 17 4 12"></polyline>
                 </svg>
-                <span>Passes quietly when no ripwire CLI or no source change</span>
+                <span
+                  >Passes with a notice when ripwire is missing; inactive outside git repos</span
+                >
               </li>
             </ul>
 
