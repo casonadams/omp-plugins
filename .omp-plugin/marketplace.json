@@ -25,6 +25,13 @@
       "category": "quality",
       "source": "./plugins/gate",
       "homepage": "https://github.com/casonadams/omp-plugins"
+    },
+    {
+      "name": "refine",
+      "description": "Read-only repo scans: /refine scan fans out scout subagents over a review, security, performance, reliability, or architecture profile",
+      "category": "quality",
+      "source": "./plugins/refine",
+      "homepage": "https://github.com/casonadams/omp-plugins"
     }
   ]
 }

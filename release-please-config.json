@@ -16,6 +16,11 @@
       "release-type": "node",
       "package-name": "gate",
       "component": "gate"
+    },
+    "plugins/refine": {
+      "release-type": "node",
+      "package-name": "refine",
+      "component": "refine"
     }
   }
 }
