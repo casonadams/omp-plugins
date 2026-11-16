@@ -28,7 +28,7 @@
     },
     {
       "name": "refine",
-      "description": "Read-only repo scans: /refine scan fans out scout subagents over a review, security, performance, reliability, or architecture profile",
+      "description": "Read-only repo scans: /refine <profile> fans out scout subagents over balanced slices of the repo for review, security, performance, reliability, or architecture",
       "category": "quality",
       "source": "./plugins/refine",
       "homepage": "https://github.com/casonadams/omp-plugins"
