@@ -2,5 +2,5 @@
   "plugins/guard": "0.8.0",
   "plugins/history": "1.0.0",
   "plugins/gate": "0.2.0",
-  "plugins/refine": "0.1.0"
+  "plugins/refine": "0.2.0"
 }
