@@ -1,0 +1,35 @@
+{
+  "name": "refine",
+  "version": "0.1.0",
+  "description": "Read-only repo scans for omp: /refine scan fans out scout subagents over a chosen review profile and reports validated findings",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "test": "bun test",
+    "test:coverage": "bun test --coverage",
+    "crap": "bun scripts/check-crap.ts",
+    "lint": "oxlint -D complexity",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun run test && bun run crap"
+  },
+  "omp": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "keywords": [
+    "omp-plugin",
+    "oh-my-pi",
+    "code-review",
+    "repo-analysis",
+    "scout"
+  ],
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "oxlint": "^1.85.0",
+    "prettier": "^3.9.9",
+    "typescript": "^7.0.2"
+  }
+}
