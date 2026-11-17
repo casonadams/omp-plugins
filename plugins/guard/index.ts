@@ -44,6 +44,8 @@ export {
   loadGuardConfig,
   resolvePreviewMarkers,
   resolveProductionMarkers,
+  DEFAULT_THRESHOLDS,
+  resolveThresholds,
 } from "./src/config";
 export {
   DEFAULT_JEV_OPTIONS,

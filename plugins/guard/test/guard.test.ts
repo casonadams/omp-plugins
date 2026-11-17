@@ -26,6 +26,8 @@ import registerBashGuard, {
   isCommandTargetingProduction,
   resolvePreviewMarkers,
   resolveProductionMarkers,
+  DEFAULT_THRESHOLDS,
+  resolveThresholds,
 } from "../index";
 
 registerMockApi();
@@ -1224,8 +1226,9 @@ describe("evaluateSystemOneSafety", () => {
       return new Response(
         JSON.stringify({
           answers: {
-            safety: { type: "noul", noul: 0.99 },
-            action: { type: "choice", choice: "safe_local" },
+            p1_prod_impact: { type: "noul", noul: 0.01 },
+            p2_malicious: { type: "noul", noul: 0.01 },
+            p3_local_impact: { type: "choice", choice: "safe_local" },
           },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1258,8 +1261,9 @@ describe("evaluateSystemOneSafety", () => {
       return new Response(
         JSON.stringify({
           answers: {
-            safety: { type: "noul", noul: 0.99 },
-            action: { type: "choice", choice: "safe_local" },
+            p1_prod_impact: { type: "noul", noul: 0.01 },
+            p2_malicious: { type: "noul", noul: 0.01 },
+            p3_local_impact: { type: "choice", choice: "safe_local" },
           },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1296,7 +1300,7 @@ describe("evaluateSystemOneSafety", () => {
         controller.signal,
         mockFetch as unknown as typeof fetch,
       ),
-    ).rejects.toThrow("System One API 401: Unauthorized");
+    ).rejects.toThrow("401");
   });
 });
 
@@ -1306,8 +1310,9 @@ describe("evaluateCommandSafety with decision models", () => {
       new Response(
         JSON.stringify({
           answers: {
-            safety: { type: "noul", noul: 0.95 },
-            action: { type: "choice", choice: "safe_local" },
+            p1_prod_impact: { type: "noul", noul: 0.01 },
+            p2_malicious: { type: "noul", noul: 0.01 },
+            p3_local_impact: { type: "choice", choice: "safe_local" },
           },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1353,8 +1358,9 @@ describe("registerBashGuard integration with decision models", () => {
       new Response(
         JSON.stringify({
           answers: {
-            safety: { type: "noul", noul: 0.95 },
-            action: { type: "choice", choice: "safe_local" },
+            p1_prod_impact: { type: "noul", noul: 0.01 },
+            p2_malicious: { type: "noul", noul: 0.01 },
+            p3_local_impact: { type: "choice", choice: "safe_local" },
           },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1401,8 +1407,9 @@ describe("registerBashGuard integration with decision models", () => {
       new Response(
         JSON.stringify({
           answers: {
-            safety: { type: "noul", noul: 0.4 },
-            action: { type: "choice", choice: "cloud_or_remote" },
+            p1_prod_impact: { type: "noul", noul: 0.9 },
+            p2_malicious: { type: "noul", noul: 0.02 },
+            p3_local_impact: { type: "choice", choice: "ambiguous" },
           },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1441,11 +1448,10 @@ describe("registerBashGuard integration with decision models", () => {
         },
       );
 
-      expect(promptedReason).toContain("System One flagged as [cloud_or_remote]");
+      expect(promptedReason).toContain("Priority 1 alert");
       expect(result).toEqual({
         block: true,
-        reason:
-          "User denied execution: System One flagged as [cloud_or_remote] (safety: 40%). (Action: cloud_or_remote)",
+        reason: expect.stringContaining("Priority 1 alert"),
       });
     } finally {
       globalThis.fetch = originalFetch;
@@ -1740,5 +1746,87 @@ describe("preview environment detection & evaluation", () => {
     expect(requestBody?.state?.preview_markers).toContain("pr-");
     expect(verdict.safe).toBe(true);
     expect(verdict.action).toBe("safe_preview");
+  });
+});
+
+describe("google-decisions & configurable thresholds", () => {
+  test("resolveThresholds merges global and per-model overrides and clamps invalid values", () => {
+    expect(resolveThresholds(undefined, "google/gemini-decision-1")).toEqual(DEFAULT_THRESHOLDS);
+
+    const custom = resolveThresholds(
+      {
+        thresholds: {
+          p1ProdImpact: 0.15,
+          p2Malicious: 0.2,
+          p2MaliciousPreview: 0.45,
+          allowAmbiguousInPreview: false,
+          byModel: {
+            "google/gemini-decision-1": { p1ProdImpact: 0.12 },
+          },
+        },
+      },
+      "google/gemini-decision-1",
+    );
+    expect(custom).toEqual({
+      p1ProdImpact: 0.12,
+      p2Malicious: 0.2,
+      p2MaliciousPreview: 0.45,
+      allowAmbiguousInPreview: false,
+    });
+
+    const invalid = resolveThresholds({
+      thresholds: { p1ProdImpact: 2, p2Malicious: -0.5 },
+    });
+    expect(invalid.p1ProdImpact).toBe(DEFAULT_THRESHOLDS.p1ProdImpact);
+    expect(invalid.p2Malicious).toBe(DEFAULT_THRESHOLDS.p2Malicious);
+  });
+
+  test("evaluateSystemOneSafety calls google-decisions with x-goog-api-key and honors thresholds", async () => {
+    let requestUrl: string | undefined;
+    let requestInit: RequestInit | undefined;
+    const mockFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      requestUrl = String(input);
+      requestInit = init;
+      return Response.json({
+        answers: {
+          q0: { type: "noul", noul: 0.08, confidence: 0.92 },
+          q1: { type: "noul", noul: 0.03, confidence: 0.97 },
+          q2: {
+            type: "choice",
+            choice: "safe_local",
+            probabilities: { safe_local: 0.95, ambiguous: 0.05 },
+            confidence: 0.95,
+          },
+        },
+        usage: { total_input_tokens: 50, total_output_tokens: 0, total_tokens: 50 },
+      });
+    };
+
+    const model = {
+      api: "google-decisions",
+      provider: "google",
+      id: "gemini-decision-1",
+      kind: "judge",
+      input: ["text", "image"],
+    } as unknown as Model<Api>;
+
+    const controller = new AbortController();
+    const verdict = await evaluateSystemOneSafety(
+      model,
+      "AIza-test-key",
+      "git diff -- infra/k8s/m365-agent/overlays/prd/kustomization.yaml",
+      controller.signal,
+      "bash",
+      mockFetch as unknown as typeof fetch,
+      undefined,
+      { thresholds: { p1ProdImpact: 0.15 } },
+    );
+
+    expect(requestUrl).toBe("https://generativelanguage.googleapis.com/v1beta/decisions");
+    const headers = new Headers(requestInit?.headers);
+    expect(headers.get("x-goog-api-key")).toBe("AIza-test-key");
+    expect(headers.get("authorization")).toBeNull();
+    expect(verdict.safe).toBe(true);
+    expect(verdict.model).toBe("gemini-decision-1");
   });
 });
