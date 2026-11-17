@@ -22,12 +22,38 @@ export interface GuardPreviewConfig {
   markers?: string[];
 }
 
+export interface GuardThresholdValues {
+  p1ProdImpact?: number;
+  p2Malicious?: number;
+  p2MaliciousPreview?: number;
+  allowAmbiguousInPreview?: boolean;
+}
+
+export interface GuardThresholdsConfig extends GuardThresholdValues {
+  byModel?: Record<string, GuardThresholdValues>;
+}
+
 export interface GuardConfig {
   production?: GuardProductionConfig;
   preview?: GuardPreviewConfig;
   allowlist?: string[];
   telemetry?: GuardTelemetryConfig;
+  thresholds?: GuardThresholdsConfig;
 }
+
+export interface ResolvedGuardThresholds {
+  p1ProdImpact: number;
+  p2Malicious: number;
+  p2MaliciousPreview: number;
+  allowAmbiguousInPreview: boolean;
+}
+
+export const DEFAULT_THRESHOLDS: ResolvedGuardThresholds = {
+  p1ProdImpact: 0.05,
+  p2Malicious: 0.1,
+  p2MaliciousPreview: 0.4,
+  allowAmbiguousInPreview: true,
+};
 
 export const DEFAULT_PRODUCTION_MARKERS = ["prod", "prd", "production", "live", "kube-system"];
 export const DEFAULT_PREVIEW_MARKERS = ["pr-", "preview", "review-app"];
@@ -253,4 +279,40 @@ export function isAllowlistedCommand(command: string, config: GuardConfig): bool
     }
   }
   return false;
+}
+
+function clampThreshold(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1
+    ? value
+    : fallback;
+}
+
+function applyThresholdOverrides(
+  base: ResolvedGuardThresholds,
+  override?: GuardThresholdValues,
+): ResolvedGuardThresholds {
+  if (!override || typeof override !== "object") return base;
+  return {
+    p1ProdImpact: clampThreshold(override.p1ProdImpact, base.p1ProdImpact),
+    p2Malicious: clampThreshold(override.p2Malicious, base.p2Malicious),
+    p2MaliciousPreview: clampThreshold(override.p2MaliciousPreview, base.p2MaliciousPreview),
+    allowAmbiguousInPreview:
+      typeof override.allowAmbiguousInPreview === "boolean"
+        ? override.allowAmbiguousInPreview
+        : base.allowAmbiguousInPreview,
+  };
+}
+
+export function resolveThresholds(
+  config?: GuardConfig,
+  modelSelector?: string,
+): ResolvedGuardThresholds {
+  const top = applyThresholdOverrides(DEFAULT_THRESHOLDS, config?.thresholds);
+  const byModel = config?.thresholds?.byModel;
+  if (!modelSelector || !byModel || typeof byModel !== "object") return top;
+
+  const bareId = modelSelector.includes("/")
+    ? modelSelector.slice(modelSelector.indexOf("/") + 1)
+    : modelSelector;
+  return applyThresholdOverrides(top, byModel[modelSelector] ?? byModel[bareId]);
 }

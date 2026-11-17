@@ -2,16 +2,27 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { YAML } from "bun";
-import { completeSimple, JUDGMENT_CHAT_MAX_TOKENS, type Api, type Model } from "@oh-my-pi/pi-ai";
+import {
+  completeSimple,
+  createNativeJudge,
+  getEnvApiKey,
+  isJudgmentApi,
+  JUDGMENT_CHAT_MAX_TOKENS,
+  type Api,
+  type Model,
+} from "@oh-my-pi/pi-ai";
 import { GUARD_ROLE_FALLBACKS, GUARD_SYSTEM_PROMPT } from "./constants";
 import type { ExtensionContext, GuardModelCandidate, GuardVerdict } from "./types";
 import {
+  DEFAULT_THRESHOLDS,
   type GuardConfig,
+  type ResolvedGuardThresholds,
   isAllowlistedCommand,
   isCommandTargetingPreview,
   loadGuardConfig,
   resolvePreviewMarkers,
   resolveProductionMarkers,
+  resolveThresholds,
 } from "./config";
 
 export type GuardModelResolution =
@@ -29,7 +40,7 @@ export function isKeylessModel(model: Model<Api>): boolean {
 }
 
 export function isDecisionModel(model: Model<Api>): boolean {
-  return model.api === "typesafe" || model.api === "openrouter-decisions" || model.kind === "judge";
+  return isJudgmentApi(model.api) || model.kind === "judge";
 }
 
 export function getConfiguredModelRole(role: string): string | undefined {
@@ -143,22 +154,50 @@ async function resolveModelApiKey(
   model: Model<Api>,
   ctx?: ExtensionContext,
 ): Promise<string | undefined> {
-  let apiKey = await ctx?.modelRegistry?.getApiKey(model).catch(() => undefined);
-  if (!apiKey && (model.api === "typesafe" || model.provider === "typesafe")) {
-    apiKey = process.env.TYPESAFE_API_KEY;
+  const registryKey = await ctx?.modelRegistry?.getApiKey(model).catch(() => undefined);
+  if (registryKey) return registryKey;
+  return getEnvApiKey(model.provider) || getEnvApiKey(model.api);
+}
+
+function getConfiguredFallbackChain(role: string): string[] {
+  const home = os.homedir();
+  for (const file of [
+    path.join(home, ".omp", "agent", "config.yml"),
+    path.join(home, ".omp", "agent", "config.yaml"),
+  ]) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      const parsed = YAML.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown> | null;
+      const retry = parsed?.retry as Record<string, unknown> | undefined;
+      const chains = retry?.fallbackChains as Record<string, unknown> | undefined;
+      const entries = chains?.[role];
+      if (Array.isArray(entries)) {
+        return entries.filter((e): e is string => typeof e === "string" && Boolean(e.trim()));
+      }
+    } catch {
+      // Ignore malformed config
+    }
   }
-  if (!apiKey && (model.api === "openrouter-decisions" || model.provider === "openrouter")) {
-    apiKey = process.env.OPENROUTER_API_KEY;
-  }
-  return apiKey;
+  return [];
 }
 
 function resolveRoleModel(role: string, ctx?: ExtensionContext): Model<Api> | undefined {
-  const model = ctx?.models?.resolve(role);
-  if (!model && role === "@guard") {
-    return fallbackResolveModel(ctx);
+  const direct = ctx?.models?.resolve(role);
+  if (direct || !ctx?.modelRegistry) return direct;
+
+  const spec = role.startsWith("@")
+    ? getConfiguredModelRole(role.slice(1)) ||
+      (role === "@guard" ? resolveConfiguredRoleName() : undefined)
+    : role;
+  if (spec) {
+    const cleanSpec = spec.replace(/:[a-z0-9_-]+$/i, "");
+    const fromRegistry =
+      ctx?.models?.resolve(cleanSpec) ||
+      resolveModelFromRegistry(cleanSpec, ctx?.modelRegistry) ||
+      buildFallbackDescriptor(cleanSpec);
+    if (fromRegistry) return fromRegistry;
   }
-  return model;
+  return role === "@guard" ? fallbackResolveModel(ctx) : undefined;
 }
 
 export async function resolveGuardCandidates(
@@ -167,7 +206,14 @@ export async function resolveGuardCandidates(
   const candidates: GuardModelCandidate[] = [];
   let firstResolvedModel: Model<Api> | undefined;
 
-  for (const role of GUARD_ROLE_FALLBACKS) {
+  const hasRealRegistry =
+    typeof (ctx?.modelRegistry as { getAvailable?: unknown } | undefined)?.getAvailable ===
+    "function";
+  const extraChain = hasRealRegistry ? getConfiguredFallbackChain("guard") : [];
+  const roleChain = Array.from(
+    new Set([...GUARD_ROLE_FALLBACKS.slice(0, 1), ...extraChain, ...GUARD_ROLE_FALLBACKS.slice(1)]),
+  );
+  for (const role of roleChain) {
     const model = resolveRoleModel(role, ctx);
     if (!model) continue;
 
@@ -317,9 +363,16 @@ async function evaluateChatSafety(
   return verdict;
 }
 
-function evaluateP1(answers: Record<string, any>): GuardVerdict | undefined {
+function evaluateP1(
+  answers: Record<string, any>,
+  thresholds: ResolvedGuardThresholds,
+): GuardVerdict | undefined {
   const prodRisk = answers.p1_prod_impact?.noul;
-  if (typeof prodRisk === "number" && !Number.isNaN(prodRisk) && prodRisk > 0.05) {
+  if (
+    typeof prodRisk === "number" &&
+    !Number.isNaN(prodRisk) &&
+    prodRisk > thresholds.p1ProdImpact
+  ) {
     const pct = Math.round(prodRisk * 100);
     return {
       safe: false,
@@ -332,10 +385,11 @@ function evaluateP1(answers: Record<string, any>): GuardVerdict | undefined {
 
 function evaluateP2(
   answers: Record<string, any>,
-  isPreview: boolean = false,
+  isPreview: boolean,
+  thresholds: ResolvedGuardThresholds,
 ): GuardVerdict | undefined {
   const maliciousRisk = answers.p2_malicious?.noul;
-  const threshold = isPreview ? 0.4 : 0.1;
+  const threshold = isPreview ? thresholds.p2MaliciousPreview : thresholds.p2Malicious;
   if (
     typeof maliciousRisk === "number" &&
     !Number.isNaN(maliciousRisk) &&
@@ -353,18 +407,21 @@ function evaluateP2(
 
 function evaluateP3(
   answers: Record<string, any>,
-  isPreview: boolean = false,
+  isPreview: boolean,
+  thresholds: ResolvedGuardThresholds,
 ): GuardVerdict | undefined {
   const localImpact = answers.p3_local_impact?.choice;
   if (localImpact) {
+    const allowAmbiguous = isPreview && thresholds.allowAmbiguousInPreview;
     const isSafe =
       localImpact === "safe_local" ||
       localImpact === "cache_cleanup" ||
       localImpact === "safe_preview" ||
-      (isPreview && localImpact === "ambiguous");
+      (allowAmbiguous && localImpact === "ambiguous");
     return {
       safe: isSafe,
-      action: isSafe && isPreview && localImpact === "ambiguous" ? "safe_preview" : localImpact,
+      action:
+        isSafe && allowAmbiguous && localImpact === "ambiguous" ? "safe_preview" : localImpact,
       reason: isSafe
         ? isPreview && (localImpact === "safe_preview" || localImpact === "ambiguous")
           ? "Command verified safe in preview environment by System One."
@@ -392,7 +449,11 @@ function evaluateLegacyAnswer(answers: Record<string, any>): GuardVerdict {
   throw new Error("Missing safety probability in System One response");
 }
 
-export function parseSystemOneOutput(data: unknown, isPreview: boolean = false): GuardVerdict {
+export function parseSystemOneOutput(
+  data: unknown,
+  isPreview: boolean = false,
+  thresholds: ResolvedGuardThresholds = DEFAULT_THRESHOLDS,
+): GuardVerdict {
   if (!data || typeof data !== "object") {
     throw new Error("Invalid response format from System One model");
   }
@@ -409,13 +470,49 @@ export function parseSystemOneOutput(data: unknown, isPreview: boolean = false):
   }
 
   const verdict =
-    evaluateP1(answers) ||
-    evaluateP2(answers, isPreview) ||
-    evaluateP3(answers, isPreview) ||
+    evaluateP1(answers, thresholds) ||
+    evaluateP2(answers, isPreview, thresholds) ||
+    evaluateP3(answers, isPreview, thresholds) ||
     evaluateLegacyAnswer(answers);
   verdict.rawAnswers = answers;
   return verdict;
 }
+
+const DEFAULT_DECISION_BASE_URLS: Record<string, string> = {
+  typesafe: "https://api.typesafe.ai",
+  "openrouter-decisions": "https://openrouter.ai/api/alpha",
+  "google-decisions": "https://generativelanguage.googleapis.com/v1beta",
+  "openai-decisions": "https://api.openai.com/v1",
+};
+
+const SAFETY_QUESTIONS = {
+  p1_prod_impact: {
+    type: "noul" as const,
+    instructions:
+      "Priority 1 - Production Safety: Does this command or script alter, delete, restart, or mutate live production infrastructure, live cloud resources (e.g. gcloud, aws, terraform), production Kubernetes workloads/namespaces, or production databases matching production_markers? Note: Ephemeral preview/sandbox operations (pr-*), read-only local git commands (diff, log, status, add, commit), and local linters/tests touching files with prod/prd in their path are NOT live production mutations.",
+  },
+  p2_malicious: {
+    type: "noul" as const,
+    instructions:
+      "Priority 2 - Malicious Activity: Does this command or script attempt unauthorized credential exfiltration, secret theft from the host system (reading ~/.ssh, ~/.aws, root .env, keyrings, /proc/*/environ), privilege escalation, arbitrary remote script piping, or host tampering? Note: Extracting or using disposable non-production test secrets in preview_markers or read-only dev project inspections (-dev-) is legitimate developer testing and NOT secret theft.",
+  },
+  p3_local_impact: {
+    type: "choice" as const,
+    instructions:
+      "Priority 3 - Local Workspace & Preview Sandbox: Classify the effect of this command on the developer environment.",
+    criteria: {
+      safe_local:
+        "Benign read-only inspection, compiling, testing, linting, or editing inside git-tracked project files.",
+      safe_preview:
+        "Benign developer operations, API requests, or Kubernetes inspections/mutations targeting ephemeral preview environments matching preview_markers.",
+      cache_cleanup:
+        "Cleaning temporary project build artifacts, target directories, or cache files.",
+      destructive_wipe:
+        "Irreversible local deletion, wiping git history (reset --hard), or removing uncommitted source work.",
+      ambiguous: "Obfuscated code, dynamic evaluation, or unclear blast radius.",
+    },
+  },
+};
 
 export async function evaluateSystemOneSafety(
   model: Model<Api>,
@@ -440,32 +537,26 @@ export async function evaluateSystemOneSafety(
     language = languageOrFetch;
   }
 
-  const baseUrl = (
-    model.baseUrl ||
-    (model.api === "openrouter-decisions"
-      ? "https://openrouter.ai/api/alpha"
-      : "https://api.typesafe.ai")
-  ).replace(/\/+$/, "");
-
-  const endpoint =
-    model.api === "openrouter-decisions" ? `${baseUrl}/decisions` : `${baseUrl}/v1/systemone`;
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (apiKey) {
-    headers.Authorization = `Bearer ${apiKey}`;
-  }
-
+  // Allow empty apiKey in unit tests where a mock fetch handles auth.
   const config = guardConfig || loadGuardConfig(resolvedCwd);
   const markers = resolveProductionMarkers(config);
   const previewMarkers = resolvePreviewMarkers(config);
   const isPreview = isCommandTargetingPreview(command, config);
+  const thresholds = resolveThresholds(config, `${model.provider}/${model.id}`);
 
-  const res = await fetchFn(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
+  const normalizedModel = {
+    ...model,
+    baseUrl: model.baseUrl || DEFAULT_DECISION_BASE_URLS[model.api] || "https://api.typesafe.ai",
+    input: Array.isArray(model.input) ? model.input : (["text"] as const),
+  } as Model<Api>;
+
+  const judge = createNativeJudge(normalizedModel, {
+    apiKey: apiKey ?? "",
+    fetch: fetchFn,
+  });
+
+  const result = await judge.judge(
+    {
       state: {
         command,
         language,
@@ -474,46 +565,12 @@ export async function evaluateSystemOneSafety(
         preview_markers: previewMarkers,
         is_preview_environment: isPreview,
       },
-      model: model.id || "jev-latest",
-      questions: {
-        p1_prod_impact: {
-          type: "noul",
-          instructions:
-            "Priority 1 - Production Safety: Does this command or script alter, delete, restart, or mutate production infrastructure, live cloud resources (e.g. gcloud, aws, terraform), production Kubernetes workloads/namespaces, or production databases matching the specified production_markers? Note: Operations strictly scoped to ephemeral preview/sandbox environments matching preview_markers (such as pr-*) are NOT production.",
-        },
-        p2_malicious: {
-          type: "noul",
-          instructions:
-            "Priority 2 - Malicious Activity: Does this command or script attempt unauthorized credential exfiltration, secret theft from the host system (reading ~/.ssh, ~/.aws, root .env, keyrings), privilege escalation, arbitrary remote script piping, or host tampering? Note: Extracting or using disposable non-production test secrets, API tokens, or test passwords within ephemeral preview environments matching specified preview_markers is legitimate developer testing and NOT secret theft.",
-        },
-        p3_local_impact: {
-          type: "choice",
-          instructions:
-            "Priority 3 - Local Workspace & Preview Sandbox: Classify the effect of this command on the developer environment.",
-          criteria: {
-            safe_local:
-              "Benign read-only inspection, compiling, testing, linting, or editing inside git-tracked project files.",
-            safe_preview:
-              "Benign developer operations, API requests, or Kubernetes inspections/mutations targeting ephemeral preview environments matching preview_markers.",
-            cache_cleanup:
-              "Cleaning temporary project build artifacts, target directories, or cache files.",
-            destructive_wipe:
-              "Irreversible local deletion, wiping git history (reset --hard), or removing uncommitted source work.",
-            ambiguous: "Obfuscated code, dynamic evaluation, or unclear blast radius.",
-          },
-        },
-      },
-    }),
-    signal,
-  });
+      questions: SAFETY_QUESTIONS,
+    },
+    { signal },
+  );
 
-  if (!res.ok) {
-    const errorBody = await res.text().catch(() => "");
-    throw new Error(`System One API ${res.status}: ${errorBody}`);
-  }
-
-  const data = await res.json();
-  const verdict = parseSystemOneOutput(data, isPreview);
+  const verdict = parseSystemOneOutput({ answers: result.answers }, isPreview, thresholds);
   verdict.model = model.id || "jev-latest";
   return verdict;
 }
